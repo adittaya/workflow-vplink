@@ -1,6 +1,6 @@
 #!/bin/bash
 
-SCRIPT_DIR="/root/recording_20260703_191656"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 AUTOMATION="$SCRIPT_DIR/generated_automation.js"
 
 cleanup() {
@@ -59,7 +59,7 @@ for (( i=1; i<=$VIEWS; i++ )); do
 
   # Run automation
   export DISPLAY=:99
-  export NODE_PATH=/root/work/node_modules
+  export NODE_PATH="$SCRIPT_DIR/node_modules"
   cd "$SCRIPT_DIR"
   timeout 480 node "$AUTOMATION" "$KEY"
   EXIT_CODE=$?

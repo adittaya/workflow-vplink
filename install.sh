@@ -19,14 +19,23 @@ detect_pkg_manager() {
   else echo "unknown"; fi
 }
 
-install_deps() {
+install_system_deps() {
   PKG_MANAGER=$(detect_pkg_manager)
   echo "  Package manager: $PKG_MANAGER"
 
+  # Common Playwright system dependencies (without audio)
+  PLAYWRIGHT_DEPS="libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libdrm2 libdbus-1-3 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2"
+
   case "$PKG_MANAGER" in
     apt)
+      # Detect Ubuntu version for libasound2 vs libasound2t64
+      if grep -qi "ubuntu 24" /etc/os-release 2>/dev/null; then
+        ASOUND="libasound2t64"
+      else
+        ASOUND="libasound2"
+      fi
       sudo apt update -qq
-      sudo apt install -y -qq curl git xvfb x11vnc libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libdbus-1-3 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2
+      sudo apt install -y -qq curl git xvfb x11vnc $PLAYWRIGHT_DEPS $ASOUND
       ;;
     yum|dnf)
       sudo $PKG_MANAGER install -y curl git xorg-x11-server-Xvfb x11vnc nss nspr atk at-spi2-atk cups-libs libdrm dbus-libs libxkbcommon libXcomposite libXdamage libXfixes libXrandr libgbm pango cairo alsa-lib
@@ -48,7 +57,7 @@ install_deps() {
 
 # ── 1. System dependencies ──────────────────────────
 echo "[1/5] Installing system dependencies..."
-install_deps
+install_system_deps
 echo ""
 
 # ── 2. Node.js ──────────────────────────────────────
@@ -72,23 +81,19 @@ else
   echo "  Cloning repo..."
   git clone "$REPO" "$DIR"
 fi
+cd "$DIR"
 echo ""
 
-# ── 4. Playwright browsers ──────────────────────────
-echo "[4/5] Installing Playwright browsers..."
-cd "$DIR"
-npm install playwright &>/dev/null
+# ── 4. Install npm dependencies & Playwright ────────
+echo "[4/5] Installing Playwright + browsers..."
+npm install 2>&1 | tail -2
 npx playwright install chromium 2>&1 | tail -1
 echo ""
 
 # ── 5. Install command ─────────────────────────────
 echo "[5/5] Installing vplink3.0 command..."
-if [ -f /usr/local/bin/vplink3.0 ]; then
-  sudo cp "$DIR/vplink3.0.sh" /usr/local/bin/vplink3.0
-else
-  sudo cp "$DIR/vplink3.0.sh" /usr/local/bin/vplink3.0
-  sudo chmod +x /usr/local/bin/vplink3.0
-fi
+sudo cp "$DIR/vplink3.0.sh" /usr/local/bin/vplink3.0
+sudo chmod +x /usr/local/bin/vplink3.0
 echo ""
 
 # ── Done ────────────────────────────────────────────

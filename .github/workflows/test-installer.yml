@@ -26,16 +26,22 @@ jobs:
 
       - name: Verify installation
         run: |
-          echo "=== Verify node ==="
+          echo "=== Node ==="
           node -v
-          echo "=== Verify vplink3.0 command ==="
+
+          echo "=== vplink3.0 command ==="
           which vplink3.0
-          echo "=== Verify Playwright ==="
-          node -e "require('playwright'); console.log('playwright OK')"
-          echo "=== Verify Xvfb ==="
+
+          echo "=== Playwright module (from install dir) ==="
+          cd "$HOME/vplink3.0"
+          node -e "require('playwright'); console.log('playwright module OK')"
+
+          echo "=== Xvfb ==="
           which Xvfb
-          echo "=== Verify x11vnc ==="
+
+          echo "=== x11vnc ==="
           which x11vnc
+
           echo "=== All checks passed ==="
 
       - name: Test Xvfb starts
@@ -47,11 +53,10 @@ jobs:
 
       - name: Test automation syntax
         run: |
-          node -c generated_automation.js
+          node -c "$HOME/vplink3.0/generated_automation.js"
           echo "Syntax OK"
 
-      - name: Test vplink3.0 help
+      - name: Test launcher syntax
         run: |
-          chmod +x vplink3.0.sh
-          timeout 5 bash vplink3.0.sh <<< "" || true
-          echo "Launcher OK"
+          bash -n "$HOME/vplink3.0/vplink3.0.sh"
+          echo "Shell syntax OK"

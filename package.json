@@ -1,0 +1,7 @@
+{
+  "name": "vplink3.0",
+  "private": true,
+  "dependencies": {
+    "playwright": "^1.52.0"
+  }
+}
