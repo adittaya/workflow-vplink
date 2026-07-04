@@ -1,0 +1,12 @@
+node_modules/
+.env
+destination_url.txt
+screenshots/
+debug_*.png
+debug_*.html
+events*.json
+summary.json
+*.mp4
+*.webm
+screen_recording*
+destination_url_*.txt

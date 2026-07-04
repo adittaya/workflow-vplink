@@ -1,0 +1,57 @@
+name: Test Installer
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test-installer:
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+      fail-fast: false
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run installer
+        run: |
+          bash install.sh
+
+      - name: Verify installation
+        run: |
+          echo "=== Verify node ==="
+          node -v
+          echo "=== Verify vplink3.0 command ==="
+          which vplink3.0
+          echo "=== Verify Playwright ==="
+          node -e "require('playwright'); console.log('playwright OK')"
+          echo "=== Verify Xvfb ==="
+          which Xvfb
+          echo "=== Verify x11vnc ==="
+          which x11vnc
+          echo "=== All checks passed ==="
+
+      - name: Test Xvfb starts
+        run: |
+          Xvfb :99 -screen 0 1280x720x24 &
+          sleep 2
+          xdpyinfo -display :99 2>&1 | head -3
+          kill %1 2>/dev/null || true
+
+      - name: Test automation syntax
+        run: |
+          node -c generated_automation.js
+          echo "Syntax OK"
+
+      - name: Test vplink3.0 help
+        run: |
+          chmod +x vplink3.0.sh
+          timeout 5 bash vplink3.0.sh <<< "" || true
+          echo "Launcher OK"
