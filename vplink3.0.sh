@@ -3,6 +3,17 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 AUTOMATION="$SCRIPT_DIR/generated_automation.js"
 
+# ── Detect Termux ─────────────────────────────────────
+is_termux() {
+  [ -n "$PREFIX" ] && [ -d /data/data/com.termux ] 2>/dev/null
+}
+
+if is_termux; then
+  TERMUX=1
+else
+  TERMUX=0
+fi
+
 cleanup() {
   pkill -9 -f "Xvfb" 2>/dev/null
   pkill -9 -f "x11vnc" 2>/dev/null
@@ -23,48 +34,52 @@ KEY=$(echo "$INPUT" | sed 's|https\?://vplink.in/||' | xargs)
 read -p "How many views? " VIEWS
 [[ ! "$VIEWS" =~ ^[0-9]+$ ]] && VIEWS=1
 
-# ── Ask for VNC ─────────────────────────────────────────
-read -p "VNC viewer needed? (y/N): " VNC_NEEDED
+# ── Ask for VNC (skip on Termux) ────────────────────────
+VNC_NEEDED="n"
+if [ "$TERMUX" = 0 ]; then
+  read -p "VNC viewer needed? (y/N): " VNC_NEEDED
+fi
 
 echo ""
 echo "Starting $VIEWS view(s) with key: $KEY"
+[ "$TERMUX" = 1 ] && echo "Termux mode: headless Chromium, no display server"
 [ "$VNC_NEEDED" = "y" ] || [ "$VNC_NEEDED" = "Y" ] && echo "VNC on port 5900" || echo "VNC disabled"
 echo ""
+
+export NODE_PATH="$SCRIPT_DIR/node_modules"
+export VPLINK_TERMUX="$TERMUX"
 
 for (( i=1; i<=$VIEWS; i++ )); do
   echo "══════════════════════════════════════════════"
   echo "  View $i of $VIEWS"
   echo "══════════════════════════════════════════════"
 
-  # Clean everything before each view
   cleanup
   sleep 2
 
-  # Start display server
-  Xvfb :99 -screen 0 1280x720x24 &>/dev/null &
-  sleep 2
-
-  # Verify Xvfb is running
-  if ! pgrep -x Xvfb > /dev/null; then
-    echo "  Xvfb failed to start, retrying..."
+  if [ "$TERMUX" = 0 ]; then
+    # Standard Linux: start display server
     Xvfb :99 -screen 0 1280x720x24 &>/dev/null &
     sleep 2
+
+    if ! pgrep -x Xvfb > /dev/null; then
+      echo "  Xvfb failed to start, retrying..."
+      Xvfb :99 -screen 0 1280x720x24 &>/dev/null &
+      sleep 2
+    fi
+
+    if [ "$VNC_NEEDED" = "y" ] || [ "$VNC_NEEDED" = "Y" ]; then
+      x11vnc -display :99 -forever -shared -rfbport 5900 &>/dev/null &
+      sleep 1
+    fi
+
+    export DISPLAY=:99
   fi
 
-  # Start VNC only if needed
-  if [ "$VNC_NEEDED" = "y" ] || [ "$VNC_NEEDED" = "Y" ]; then
-    x11vnc -display :99 -forever -shared -rfbport 5900 &>/dev/null &
-    sleep 1
-  fi
-
-  # Run automation
-  export DISPLAY=:99
-  export NODE_PATH="$SCRIPT_DIR/node_modules"
   cd "$SCRIPT_DIR"
   timeout 480 node "$AUTOMATION" "$KEY"
   EXIT_CODE=$?
 
-  # Save result for this view
   if [ -f "$SCRIPT_DIR/destination_url.txt" ]; then
     DEST=$(cat "$SCRIPT_DIR/destination_url.txt")
     mv "$SCRIPT_DIR/destination_url.txt" "$SCRIPT_DIR/destination_url_${i}.txt"
@@ -73,10 +88,8 @@ for (( i=1; i<=$VIEWS; i++ )); do
   echo ""
 done
 
-# Clean up final
 cleanup
 
-# Summary
 echo "══════════════════════════════════════════════"
 echo "  All $VIEWS view(s) completed"
 echo "══════════════════════════════════════════════"

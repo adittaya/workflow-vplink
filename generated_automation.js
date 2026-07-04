@@ -1,4 +1,9 @@
-const { chromium } = require('playwright');
+let chromium;
+try {
+  ({ chromium } = require('playwright'));
+} catch {
+  ({ chromium } = require('playwright-core'));
+}
 const fs = require('fs');
 const readline = require('readline');
 
@@ -26,7 +31,16 @@ process.on('SIGINT', async () => {
 (async () => {
   const VPLINK_KEY = await getKey();
   if (!VPLINK_KEY) { console.error('No key provided'); process.exit(1); }
-  browser = await chromium.launch({ headless: false, slowMo: 50 });
+  const isTermux = process.env.VPLINK_TERMUX === '1';
+  const launchOpts = { slowMo: 50 };
+  if (isTermux) {
+    launchOpts.headless = true;
+    launchOpts.executablePath = process.env.CHROMIUM_PATH || '/data/data/com.termux/files/usr/bin/chromium-browser';
+    launchOpts.args = ['--no-sandbox', '--disable-gpu'];
+  } else {
+    launchOpts.headless = false;
+  }
+  browser = await chromium.launch(launchOpts);
   const context = await browser.newContext({
     viewport: { width: 1280, height: 720 },
   });

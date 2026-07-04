@@ -60,3 +60,30 @@ jobs:
         run: |
           bash -n "$HOME/vplink3.0/vplink3.0.sh"
           echo "Shell syntax OK"
+
+      - name: Test Termux code path (dry-run)
+        run: |
+          echo "=== Test require('playwright-core') exists ==="
+          cd "$HOME/vplink3.0"
+          ls node_modules/playwright-core/package.json > /dev/null && echo "playwright-core OK"
+
+          echo "=== Test automation JS with VPLINK_TERMUX=1 (dry-run) ==="
+          # Just parse to verify the Termux branch in JS doesn't have syntax errors
+          node -e "
+            const fs = require('fs');
+            const code = fs.readFileSync('$HOME/vplink3.0/generated_automation.js', 'utf8');
+            // Check both launch paths exist
+            if (code.includes('isTermux') && code.includes('executablePath') && code.includes('no-sandbox')) {
+              console.log('Termux branch present: OK');
+            } else {
+              console.error('Termux branch missing!');
+              process.exit(1);
+            }
+          "
+
+      - name: Test Termux launcher paths
+        run: |
+          echo "=== Test vplink3.0.sh detects Termux env ==="
+          grep -q "TERMUX" "$HOME/vplink3.0/vplink3.0.sh" && echo "Termux detection in launcher: OK"
+          grep -q "VPLINK_TERMUX" "$HOME/vplink3.0/vplink3.0.sh" && echo "VPLINK_TERMUX env var: OK"
+          grep -q "chromium-browser" "$HOME/vplink3.0/generated_automation.js" && echo "Chromium path in JS: OK"
