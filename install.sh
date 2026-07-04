@@ -23,17 +23,17 @@ install_system_deps() {
   PKG_MANAGER=$(detect_pkg_manager)
   echo "  Package manager: $PKG_MANAGER"
 
-  # Common Playwright system dependencies (without audio)
-  PLAYWRIGHT_DEPS="libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libdrm2 libdbus-1-3 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2"
-
   case "$PKG_MANAGER" in
     apt)
-      # Detect Ubuntu version for libasound2 vs libasound2t64
-      if grep -qi "ubuntu 24" /etc/os-release 2>/dev/null; then
-        ASOUND="libasound2t64"
+      # Check if we're on a Debian derivative that uses lib*t64 naming (Ubuntu 24.04+, Debian 13+)
+      if grep -qi "ubuntu 24" /etc/os-release 2>/dev/null || grep -qi "ubuntu 25" /etc/os-release 2>/dev/null; then
+        LIBPOSTFIX="t64"
       else
-        ASOUND="libasound2"
+        LIBPOSTFIX=""
       fi
+      # Build package list dynamically — some packages don't have t64 variant
+      PLAYWRIGHT_DEPS="libnss3 libnspr4 libatk1.0-0${LIBPOSTFIX} libatk-bridge2.0-0${LIBPOSTFIX} libcups2${LIBPOSTFIX} libdrm2 libdbus-1-3 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2"
+      ASOUND="libasound2${LIBPOSTFIX}"
       sudo apt update -qq
       sudo apt install -y -qq curl git xvfb x11vnc $PLAYWRIGHT_DEPS $ASOUND
       ;;
@@ -64,8 +64,10 @@ echo ""
 echo "[2/5] Checking Node.js..."
 if command -v node &>/dev/null && [ "$(node -v | cut -d. -f1 | tr -d v)" -ge 18 ]; then
   echo "  Node.js $(node -v) already installed"
+elif command -v snap &>/dev/null && sudo snap install node --classic 2>/dev/null; then
+  echo "  Node.js $(node -v) installed via snap"
 else
-  echo "  Installing Node.js..."
+  echo "  Installing Node.js via nodesource..."
   curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &>/dev/null
   sudo apt install -y -qq nodejs &>/dev/null
   echo "  Node.js $(node -v) installed"
