@@ -25,9 +25,23 @@ process.on('SIGINT', async () => {
   } else {
     launchOpts.headless = false;
   }
+  if (process.env.VPLINK_PROXY) {
+    launchOpts.args = [...(launchOpts.args || []), `--proxy-server=${process.env.VPLINK_PROXY}`];
+  }
+  if (process.env.VPLINK_EXTRA_ARGS) {
+    launchOpts.args = [...(launchOpts.args || []), ...process.env.VPLINK_EXTRA_ARGS.split(' ')];
+  }
 
   browser = await chromium.launch(launchOpts);
-  const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+  const ctxOpts = { viewport: { width: 1280, height: 720 } };
+  if (process.env.VPLINK_USER_AGENT) ctxOpts.userAgent = process.env.VPLINK_USER_AGENT;
+  if (process.env.VPLINK_VIEWPORT_WIDTH || process.env.VPLINK_VIEWPORT_HEIGHT) {
+    ctxOpts.viewport = {
+      width: parseInt(process.env.VPLINK_VIEWPORT_WIDTH) || 1280,
+      height: parseInt(process.env.VPLINK_VIEWPORT_HEIGHT) || 720,
+    };
+  }
+  const context = await browser.newContext(ctxOpts);
   const page = await context.newPage();
   page.setDefaultNavigationTimeout(60000);
 

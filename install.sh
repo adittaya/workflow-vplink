@@ -127,7 +127,7 @@ fi
 echo ""
 
 # ── 5. Install command ─────────────────────────────
-echo "[5/5] Installing vplink3.0 command..."
+echo "[5/6] Installing vplink3.0 command..."
 if [ "$TERMUX" = 1 ]; then
   cp "$DIR/vplink3.0.sh" "$PREFIX/bin/vplink3.0"
   chmod +x "$PREFIX/bin/vplink3.0"
@@ -137,7 +137,71 @@ else
 fi
 echo ""
 
-# ── Done ────────────────────────────────────────────
+# ── 6. Credential setup ────────────────────────────
+echo "[6/6] Credential setup..."
+CONFIG_DIR="$HOME/.vplink3.0"
+mkdir -p "$CONFIG_DIR"
+CONFIG_FILE="$CONFIG_DIR/config.json"
+
+if [ -f "$CONFIG_FILE" ] && [ -s "$CONFIG_FILE" ]; then
+  echo "  Config already exists at $CONFIG_FILE"
+  read -p "  Overwrite credentials? (y/N): " OVERWRITE
+  if [[ ! "$OVERWRITE" =~ ^[yY] ]]; then
+    echo "  Skipping credential setup."
+    echo ""
+    echo "╔══════════════════════════════════════════════╗"
+    echo "║  Installation complete!                      ║"
+    echo "║                                              ║"
+    echo "║  Run: vplink3.0                              ║"
+    echo "╚══════════════════════════════════════════════╝"
+    exit 0
+  fi
+fi
+
+echo ""
+echo "  Enter your Supabase credentials for proxy rotation."
+echo "  (Leave blank and press Enter to skip — proxy feature disabled)"
+echo ""
+
+read -p "  Supabase URL: " SB_URL
+read -p "  Supabase Anon/Publishable Key: " SB_KEY
+read -p "  Supabase Secret/Service Key: " SB_SECRET
+
+if [ -n "$SB_URL" ] && [ -n "$SB_KEY" ]; then
+  cat > "$CONFIG_FILE" <<EOF
+{
+  "supabase_url": "${SB_URL}",
+  "supabase_key": "${SB_KEY}",
+  "supabase_secret": "${SB_SECRET}",
+  "proxy_enabled": true,
+  "proxy_tier": "premium",
+  "youtube_traffic": false,
+  "mobile_profile": false,
+  "random_urls": [],
+  "vnc_port": 5900,
+  "views": 1
+}
+EOF
+  echo "  Credentials saved to $CONFIG_FILE"
+else
+  cat > "$CONFIG_FILE" <<EOF
+{
+  "supabase_url": "",
+  "supabase_key": "",
+  "supabase_secret": "",
+  "proxy_enabled": false,
+  "proxy_tier": "premium",
+  "youtube_traffic": false,
+  "mobile_profile": false,
+  "random_urls": [],
+  "vnc_port": 5900,
+  "views": 1
+}
+EOF
+  echo "  Empty config saved (proxy disabled)."
+fi
+
+echo ""
 echo "╔══════════════════════════════════════════════╗"
 echo "║  Installation complete!                      ║"
 echo "║                                              ║"
