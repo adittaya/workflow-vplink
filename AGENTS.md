@@ -1,5 +1,14 @@
 # VPLink 3.0 — Agent Context
 
+> ⚠️ **MANDATORY: Any AI agent editing this project MUST update this file** with changes made, new decisions, fixes, or known issues. This prevents hallucination across sessions. If you don't update this file, the next agent will have stale context.
+
+## Version History
+| Date | Change | Author |
+|------|--------|--------|
+| 2026-07-05 | Initial funnel automation working — `automation.js` replaces `generated_automation.js` | AI |
+| 2026-07-05 | Get Link handler fixed — captures destination from new tab + current page fallback | AI |
+| 2026-07-05 | Cleanup: removed record.js, recording dirs, node_modules, old results | AI |
+
 ## Overview
 Automated vplink.in URL funnel: navigate auto-redirects, countdown timers, "Continue" buttons on onlinewish/krishitalk articles, click "Get Link" on vplink.in, and capture the final destination URL.
 
@@ -9,8 +18,6 @@ Automated vplink.in URL funnel: navigate auto-redirects, countdown timers, "Cont
 | `automation.js` | **Main script** — Puppeteer/Playwright automation of the full funnel (210 lines) |
 | `vplink3.0.sh` | **Launcher** — Xvfb/VNC setup, loop for multiple views, result saving (100 lines) |
 | `install.sh` | **Cross-platform installer** — deps, Node.js, Playwright Chromium, command symlink (145 lines) |
-| `record.js` | Manual flow recorder — captures screenshots + DOM snapshots (268 lines) |
-| `record.sh` | Recorder launcher with Xvfb + VNC |
 | `package.json` | Deps: `playwright` + `playwright-core` |
 | `.gitignore` | Excludes node_modules, screenshots, debug files, recording artifacts |
 
@@ -91,4 +98,3 @@ node automation.js <KEY>
 - Article selectors are fragile — `#main > div:nth-child(4) > center > center > a` depends on krishitalk.com DOM structure
 - No user-agent / viewport rotation for fingerprint diversity
 - Interactive-only shell script — no `--key` / `--views` / `--vnc` flags for scripting
-- Recording dirs (`recording_*/`) not gitignored — can bloat repo if committed
