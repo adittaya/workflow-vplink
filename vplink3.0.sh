@@ -15,11 +15,9 @@ else
 fi
 
 cleanup() {
-  pkill -9 -f "Xvfb" 2>/dev/null
-  pkill -9 -f "x11vnc" 2>/dev/null
-  pkill -9 -f "chrome.*remote-debugging" 2>/dev/null
+  pkill -9 -f "Xvfb :99" 2>/dev/null
+  pkill -9 -f "x11vnc.*:99" 2>/dev/null
   pkill -9 -f "playwright" 2>/dev/null
-  pkill -9 -f "generated_auto" 2>/dev/null
   rm -f /tmp/.X99-lock /tmp/.X11-unix/X99 2>/dev/null
 }
 
@@ -28,10 +26,13 @@ trap 'echo ""; echo "Interrupted."; cleanup; exit 130' SIGINT SIGTERM
 # ── Ask for link ────────────────────────────────────────
 read -p "Enter vplink URL or key: " INPUT
 KEY=$(echo "$INPUT" | sed 's|https\?://vplink.in/||' | xargs)
-[ -z "$KEY" ] && { echo "Error: no key"; exit 1; }
+while [ -z "$KEY" ]; do
+  read -p "Key cannot be empty. Enter vplink URL or key: " INPUT
+  KEY=$(echo "$INPUT" | sed 's|https\?://vplink.in/||' | xargs)
+done
 
 # ── Ask for views ───────────────────────────────────────
-read -p "How many views? " VIEWS
+read -p "How many views? (1): " VIEWS
 [[ ! "$VIEWS" =~ ^[0-9]+$ ]] && VIEWS=1
 
 # ── Ask for VNC (skip on Termux) ────────────────────────
@@ -41,9 +42,16 @@ if [ "$TERMUX" = 0 ]; then
 fi
 
 echo ""
-echo "Starting $VIEWS view(s) with key: $KEY"
-[ "$TERMUX" = 1 ] && echo "Termux mode: headless Chromium, no display server"
-[ "$VNC_NEEDED" = "y" ] || [ "$VNC_NEEDED" = "Y" ] && echo "VNC on port 5900" || echo "VNC disabled"
+echo "╔══════════════════════════════════════════════╗"
+echo "║  Starting $VIEWS view(s) with key: $KEY"
+[ "$TERMUX" = 1 ] && echo "║  Mode: Termux (headless)" || echo "║  Mode: Desktop Linux"
+[[ "$VNC_NEEDED" =~ ^[yY] ]] && echo "║  VNC: :5900 (connect anytime)" || echo "║  VNC: disabled"
+echo "╚══════════════════════════════════════════════╝"
+echo ""
+
+# ── Confirm ─────────────────────────────────────────────
+read -p "Proceed? (Y/n): " CONFIRM
+[[ "$CONFIRM" =~ ^[nN] ]] && { echo "Aborted."; exit 0; }
 echo ""
 
 export NODE_PATH="$SCRIPT_DIR/node_modules"
@@ -68,7 +76,7 @@ for (( i=1; i<=$VIEWS; i++ )); do
       sleep 2
     fi
 
-    if [ "$VNC_NEEDED" = "y" ] || [ "$VNC_NEEDED" = "Y" ]; then
+    if [[ "$VNC_NEEDED" =~ ^[yY] ]]; then
       x11vnc -display :99 -forever -shared -rfbport 5900 &>/dev/null &
       sleep 1
     fi
@@ -79,6 +87,9 @@ for (( i=1; i<=$VIEWS; i++ )); do
   cd "$SCRIPT_DIR"
   timeout 480 node "$AUTOMATION" "$KEY"
   EXIT_CODE=$?
+  if [ "$EXIT_CODE" -ne 0 ] && [ "$EXIT_CODE" -ne 124 ]; then
+    echo "  ⚠️  Automation exited with code $EXIT_CODE"
+  fi
 
   if [ -f "$SCRIPT_DIR/destination_url.txt" ]; then
     DEST=$(cat "$SCRIPT_DIR/destination_url.txt")
@@ -93,8 +104,16 @@ cleanup
 echo "══════════════════════════════════════════════"
 echo "  All $VIEWS view(s) completed"
 echo "══════════════════════════════════════════════"
+RESULTS=()
 for (( i=1; i<=$VIEWS; i++ )); do
-  [ -f "$SCRIPT_DIR/destination_url_${i}.txt" ] && echo "  View $i: $(cat "$SCRIPT_DIR/destination_url_${i}.txt")"
+  if [ -f "$SCRIPT_DIR/destination_url_${i}.txt" ]; then
+    URL=$(cat "$SCRIPT_DIR/destination_url_${i}.txt")
+    echo "  View $i: $URL"
+    RESULTS+=("$URL")
+  fi
 done
+UNIQUE=$(printf '%s\n' "${RESULTS[@]}" | sort -u | wc -l)
+echo "  ───────────────────────────────────────────"
+echo "  Unique destinations: $UNIQUE / ${#RESULTS[@]}"
 echo ""
 echo "Results saved in $SCRIPT_DIR/destination_url_*.txt"
