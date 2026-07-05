@@ -233,7 +233,17 @@ process.on('SIGINT', async () => {
           console.log('  clicked Verify');
           await ms(3000);
           for (let i = 0; i < 15; i++) {
-            if (await clickSel('#btn7 > button')) { console.log('  clicked Continue (btn7)'); break; }
+            const clicked = await page.evaluate(() => {
+              const el = document.querySelector('#btn7 > button');
+              if (el && el.offsetParent !== null) {
+                el.scrollIntoView({ block: 'center' });
+                el.click();
+                return true;
+              }
+              window.scrollBy(0, 300);
+              return false;
+            }).catch(() => false);
+            if (clicked) { console.log('  clicked Continue (btn7)'); break; }
             await ms(1000);
           }
           await ms(5000);
