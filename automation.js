@@ -134,6 +134,8 @@ process.on('SIGINT', async () => {
   await page.waitForLoadState('networkidle').catch(() => {});
   await ms(2000);
 
+  const stuckUrls = new Set();
+
   outer:
   for (let cycle = 0; cycle < 30 && !destinationUrl; cycle++) {
     const url = page.url();
@@ -198,6 +200,11 @@ process.on('SIGINT', async () => {
     }
 
     if (url.includes('onlinewish') || url.includes('krishitalk')) {
+      if (stuckUrls.has(url)) {
+        console.log('  already tried everything on this page, skipping...');
+        await ms(3000);
+        continue;
+      }
       const startUrl = page.url();
       const tried = new Set();
 
@@ -243,6 +250,9 @@ process.on('SIGINT', async () => {
         if (page.url() === startUrl) {
           tried.add(btn);
         }
+      }
+      if (page.url() === startUrl) {
+        stuckUrls.add(startUrl);
       }
       continue;
     }
