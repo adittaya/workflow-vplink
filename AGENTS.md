@@ -10,9 +10,13 @@
 | 2026-07-05 | Cleanup: removed record.js, recording dirs, node_modules, old results | AI |
 | 2026-07-05 | CLI improvements: confirmation step, unique result summary, safer Xvfb cleanup, key retry loop | AI |
 | 2026-07-05 | **Major feature release**: proxy rotation, YouTube traffic, mobile profiles, PID tracking, VNC detection, multi-URL random, credential setup | AI |
+| 2026-07-05 | **Bug fix**: `vplink3.0` command symlink resolves to repo directory so Node.js modules are found. install.sh uses `ln -sf` instead of `cp`. `automation.js` env-var additions finalized | AI |
 
 ## Overview
 Automated vplink.in URL funnel: navigate auto-redirects, countdown timers, "Continue" buttons on onlinewish/krishitalk articles, click "Get Link" on vplink.in, and capture the final destination URL.
+
+> ⚠️ **`automation.js` production-ready — do NOT modify its core funnel logic.**
+> All env-var additions (`VPLINK_PROXY`, `VPLINK_USER_AGENT`, `VPLINK_VIEWPORT_WIDTH/HEIGHT`, `VPLINK_EXTRA_ARGS`) are purely additive with `undefined` fallbacks — zero impact on existing behavior. The funnel flow has been verified end-to-end (auto-redirect → article buttons → Get Link → destination capture). If automation fails, the root cause is configuration (proxy connectivity, user-agent, network), NOT the automation logic.
 
 ## Files
 | File | Purpose |

@@ -1,6 +1,7 @@
 #!/bin/bash
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT="$(readlink -f "$0")"  # resolve symlinks to real path
+SCRIPT_DIR="$(dirname "$SCRIPT")"
 AUTOMATION="$SCRIPT_DIR/automation.js"
 CONFIG_MODULE="$SCRIPT_DIR/config.js"
 PROXY_ROTATOR="$SCRIPT_DIR/proxy-rotator.js"

@@ -129,13 +129,13 @@ echo ""
 # ── 5. Install command ─────────────────────────────
 echo "[5/6] Installing vplink3.0 command..."
 if [ "$TERMUX" = 1 ]; then
-  cp "$DIR/vplink3.0.sh" "$PREFIX/bin/vplink3.0"
+  ln -sf "$DIR/vplink3.0.sh" "$PREFIX/bin/vplink3.0"
   chmod +x "$PREFIX/bin/vplink3.0"
 else
-  $SUDO cp "$DIR/vplink3.0.sh" /usr/local/bin/vplink3.0
-  $SUDO chmod +x /usr/local/bin/vplink3.0
+  ln -sf "$DIR/vplink3.0.sh" /usr/local/bin/vplink3.0
+  chmod +x /usr/local/bin/vplink3.0
 fi
-echo ""
+echo "  Symlinked to $DIR/vplink3.0.sh"
 
 # ── 6. Credential setup ────────────────────────────
 echo "[6/6] Credential setup..."
