@@ -14,6 +14,7 @@
 | 2026-07-05 | **Mass analyzer**: parallel proxy testing (50 concurrent), HTTPS CONNECT verification, batch dead-IP deletion. Tested 500 proxies in ~95s | AI |
 | 2026-07-05 | **Article handler rewrite**: inner while loop tracks tried buttons per page-stay, continuous scroll, skip-tried mechanism. Handles all article types (simple, verify+continue, lazy-loaded, multi-step). Tested end-to-end without proxy — 3 button types handled (`#tp-snp2`, `#btn6`→`#btn7`, `anchor`), destination captured. | AI |
 | 2026-07-05 | **Proxy stability fixes**: socket error handlers in proxy test (prevent ETIMEDOUT crash), latency filter (<5s) for proxy selection, 90s nav timeout with retry for slow proxies | AI |
+| 2026-07-05 | **Proxy test fix**: multi-target fallback (httpbin.org + example.com) — proxies that block httpbin.org no longer fail the test. CONNECT response handler for non-200 status codes prevents hanging. Tested with residential proxy that blocks httpbin.org but works for vplink.in (197.248.239.226:18080). Working proxy pool increased from 26 → 108. | AI |
 
 ## Overview
 Automated vplink.in URL funnel: navigate auto-redirects, countdown timers, "Continue" buttons on onlinewish/krishitalk articles, click "Get Link" on vplink.in, and capture the final destination URL.

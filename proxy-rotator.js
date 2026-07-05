@@ -33,14 +33,56 @@ async function deleteProxy(ip, port) {
 }
 
 // Test proxy — tries HTTPS CONNECT first, falls back to HTTP absolute-form URI
+const TEST_TARGETS = [
+  { host: 'httpbin.org', path: '/ip', responseJson: true },
+  { host: 'example.com', path: '/', responseJson: false },
+];
+
 async function testProxy(proxy) {
   const start = Date.now();
   const result = { ...proxy, latency_ms: 0, origin: '', speed_kbps: 0 };
 
-  const tryConnect = () => new Promise((resolve) => {
+  // Try each target until one works (proxies often block specific sites like httpbin.org)
+  for (const target of TEST_TARGETS) {
+    // Try HTTPS CONNECT
+    let origin = await tryConnect(proxy, target);
+    // Fall back to HTTP absolute-form
+    if (!origin) origin = await tryHttp(proxy, target);
+    if (origin) {
+      result.origin = origin;
+      result.latency_ms = Date.now() - start;
+      // Speed test: download 100KB via HTTP proxy
+      try {
+        const speedStart = Date.now();
+        const resp = await new Promise((resolve) => {
+          const req = http.request({
+            hostname: proxy.ip, port: proxy.port,
+            path: 'http://speedtest.tele2.net/100KB.zip', method: 'GET',
+            headers: { 'Host': 'speedtest.tele2.net' }, timeout: 10000,
+          }, (res) => {
+            res.on('error', () => resolve(0));
+            let total = 0;
+            res.on('data', (chunk) => total += chunk.length);
+            res.on('end', () => resolve(total));
+          });
+          req.on('error', () => resolve(0));
+          req.on('timeout', () => { req.destroy(); resolve(0); });
+          req.end();
+        });
+        const speedTime = (Date.now() - speedStart) / 1000;
+        result.speed_kbps = speedTime > 0 ? Math.round(resp / speedTime / 1024) : 0;
+      } catch {}
+      return result;
+    }
+  }
+  return null;
+}
+
+function tryConnect(proxy, target) {
+  return new Promise((resolve) => {
     const connReq = http.request({
       hostname: proxy.ip, port: proxy.port,
-      method: 'CONNECT', path: 'httpbin.org:443',
+      method: 'CONNECT', path: target.host + ':443',
       timeout: 8000,
     });
     connReq.on('connect', (res, socket) => {
@@ -48,80 +90,59 @@ async function testProxy(proxy) {
       socket.on('timeout', () => { socket.destroy(); resolve(null); });
       socket.setTimeout(10000);
       const tlsReq = https.request({
-        socket, hostname: 'httpbin.org', path: '/ip',
-        method: 'GET', headers: { 'Host': 'httpbin.org' },
+        socket, hostname: target.host, path: target.path,
+        method: 'GET', headers: { 'Host': target.host },
         timeout: 6000, rejectUnauthorized: false,
       }, (tlsRes) => {
         let data = '';
         tlsRes.on('data', (chunk) => data += chunk);
         tlsRes.on('end', () => {
-          try {
-            const json = JSON.parse(data);
-            resolve(json && json.origin ? json.origin : null);
-          } catch { resolve(null); }
+          if (target.responseJson) {
+            try { const json = JSON.parse(data); resolve(json && json.origin ? json.origin : null); }
+            catch { resolve(null); }
+          } else {
+            // For non-JSON targets (e.g., example.com), any 2xx response means it worked
+            resolve(tlsRes.statusCode >= 200 && tlsRes.statusCode < 300 ? target.host : null);
+          }
         });
       });
       tlsReq.on('error', () => resolve(null));
       tlsReq.on('timeout', () => { tlsReq.destroy(); resolve(null); });
       tlsReq.end();
     });
+    connReq.on('response', (res) => {
+      res.on('data', () => {});
+      res.on('end', () => resolve(null));
+    });
     connReq.on('error', () => resolve(null));
     connReq.on('timeout', () => { connReq.destroy(); resolve(null); });
     connReq.end();
   });
+}
 
-  const tryHttp = () => new Promise((resolve) => {
+function tryHttp(proxy, target) {
+  return new Promise((resolve) => {
     const req = http.request({
       hostname: proxy.ip, port: proxy.port,
-      path: 'http://httpbin.org/ip', method: 'GET',
-      headers: { 'Host': 'httpbin.org' }, timeout: 8000,
+      path: 'http://' + target.host + target.path, method: 'GET',
+      headers: { 'Host': target.host }, timeout: 8000,
     }, (res) => {
       res.on('error', () => resolve(null));
       let data = '';
       res.on('data', (chunk) => data += chunk);
       res.on('end', () => {
-        try {
-          const json = JSON.parse(data);
-          resolve(json && json.origin ? json.origin : null);
-        } catch { resolve(null); }
+        if (target.responseJson) {
+          try { const json = JSON.parse(data); resolve(json && json.origin ? json.origin : null); }
+          catch { resolve(null); }
+        } else {
+          resolve(res.statusCode >= 200 && res.statusCode < 300 ? target.host : null);
+        }
       });
     });
     req.on('error', () => resolve(null));
     req.on('timeout', () => { req.destroy(); resolve(null); });
     req.end();
   });
-
-  // Try HTTPS CONNECT first, fall back to HTTP
-  let origin = await tryConnect();
-  if (!origin) origin = await tryHttp();
-  if (!origin) return null;
-
-  result.origin = origin;
-  result.latency_ms = Date.now() - start;
-
-  // Speed test: download 100KB via whichever method works
-  try {
-    const speedStart = Date.now();
-    const resp = await new Promise((resolve) => {
-      const req = http.request({
-        hostname: proxy.ip, port: proxy.port,
-        path: 'http://speedtest.tele2.net/100KB.zip', method: 'GET',
-        headers: { 'Host': 'speedtest.tele2.net' }, timeout: 10000,
-      }, (res) => {
-        res.on('error', () => resolve(0));
-        let total = 0;
-        res.on('data', (chunk) => total += chunk.length);
-        res.on('end', () => resolve(total));
-      });
-      req.on('error', () => resolve(0));
-      req.on('timeout', () => { req.destroy(); resolve(0); });
-      req.end();
-    });
-    const speedTime = (Date.now() - speedStart) / 1000;
-    result.speed_kbps = speedTime > 0 ? Math.round(resp / speedTime / 1024) : 0;
-  } catch {}
-
-  return result;
 }
 
 async function filterAndClean(tier = 'premium', concurrency = 50, deleteDead = false) {
