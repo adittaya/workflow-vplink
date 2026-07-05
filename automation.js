@@ -123,7 +123,14 @@ process.on('SIGINT', async () => {
 
   // ── START ──────────────────────────────────────────
   console.log('=== Start funnel ===');
-  await page.goto(`https://vplink.in/${KEY}`, { waitUntil: 'domcontentloaded', timeout: 45000 });
+  const navTimeout = process.env.VPLINK_PROXY ? 90000 : 45000;
+  try {
+    await page.goto(`https://vplink.in/${KEY}`, { waitUntil: 'domcontentloaded', timeout: navTimeout });
+  } catch {
+    console.log('  navigation timeout, retrying once...');
+    await ms(2000);
+    await page.goto(`https://vplink.in/${KEY}`, { waitUntil: 'domcontentloaded', timeout: navTimeout });
+  }
   await page.waitForLoadState('networkidle').catch(() => {});
   await ms(2000);
 

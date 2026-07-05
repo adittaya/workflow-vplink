@@ -13,6 +13,7 @@
 | 2026-07-05 | **Bug fix**: `vplink3.0` command symlink resolves to repo directory so Node.js modules are found. install.sh uses `ln -sf` instead of `cp`. `automation.js` env-var additions finalized | AI |
 | 2026-07-05 | **Mass analyzer**: parallel proxy testing (50 concurrent), HTTPS CONNECT verification, batch dead-IP deletion. Tested 500 proxies in ~95s | AI |
 | 2026-07-05 | **Article handler rewrite**: inner while loop tracks tried buttons per page-stay, continuous scroll, skip-tried mechanism. Handles all article types (simple, verify+continue, lazy-loaded, multi-step). Tested end-to-end without proxy — 3 button types handled (`#tp-snp2`, `#btn6`→`#btn7`, `anchor`), destination captured. | AI |
+| 2026-07-05 | **Proxy stability fixes**: socket error handlers in proxy test (prevent ETIMEDOUT crash), latency filter (<5s) for proxy selection, 90s nav timeout with retry for slow proxies | AI |
 
 ## Overview
 Automated vplink.in URL funnel: navigate auto-redirects, countdown timers, "Continue" buttons on onlinewish/krishitalk articles, click "Get Link" on vplink.in, and capture the final destination URL.

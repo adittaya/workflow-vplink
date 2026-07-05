@@ -44,6 +44,9 @@ async function testProxy(proxy) {
       timeout: 8000,
     });
     connReq.on('connect', (res, socket) => {
+      socket.on('error', () => resolve(null));
+      socket.on('timeout', () => { socket.destroy(); resolve(null); });
+      socket.setTimeout(10000);
       const tlsReq = https.request({
         socket, hostname: 'httpbin.org', path: '/ip',
         method: 'GET', headers: { 'Host': 'httpbin.org' },
@@ -73,6 +76,7 @@ async function testProxy(proxy) {
       path: 'http://httpbin.org/ip', method: 'GET',
       headers: { 'Host': 'httpbin.org' }, timeout: 8000,
     }, (res) => {
+      res.on('error', () => resolve(null));
       let data = '';
       res.on('data', (chunk) => data += chunk);
       res.on('end', () => {
@@ -104,6 +108,7 @@ async function testProxy(proxy) {
         path: 'http://speedtest.tele2.net/100KB.zip', method: 'GET',
         headers: { 'Host': 'speedtest.tele2.net' }, timeout: 10000,
       }, (res) => {
+        res.on('error', () => resolve(0));
         let total = 0;
         res.on('data', (chunk) => total += chunk.length);
         res.on('end', () => resolve(total));
@@ -191,19 +196,30 @@ async function getProxy(tier = 'premium') {
     return null;
   }
 
-  // Prefer faster proxies: sort by speed descending (faster first), then latency ascending
-  proxies.sort((a, b) => {
+  // Filter out low-quality proxies — require latency < 5s
+  const usable = proxies.filter(p => p.latency_ms && p.latency_ms < 5000);
+  if (usable.length === 0) {
+    console.error(`  [Proxy] All ${proxies.length} proxies are too slow, taking the fastest anyway`);
+  }
+  const pool = usable.length > 0 ? usable : proxies;
+
+  // Sort: faster proxies first, lower latency as tiebreaker
+  pool.sort((a, b) => {
     const aSpeed = a.speed_kbps || 0;
     const bSpeed = b.speed_kbps || 0;
     if (bSpeed !== aSpeed) return bSpeed - aSpeed;
     return (a.latency_ms || 9999) - (b.latency_ms || 9999);
   });
 
+  // Random pick from top 30% (weighted toward faster proxies)
+  const topN = Math.max(1, Math.ceil(pool.length * 0.3));
+  const shortlist = pool.slice(0, topN);
+
   const history = config.loadProxyHistory();
-  const picked = getRotationIndex(proxies, history);
+  const picked = getRotationIndex(shortlist, history);
   if (!picked) {
     console.error('  [Proxy] All proxies used in last 24h, recycling oldest');
-    const fallback = proxies[Math.floor(Math.random() * Math.min(proxies.length, 5))];
+    const fallback = shortlist[Math.floor(Math.random() * Math.min(shortlist.length, 5))];
     console.error(`  [Proxy] Selected: ${fallback.ip}:${fallback.port} (${fallback.speed_kbps || '?'} KB/s, ${fallback.latency_ms}ms)`);
     return fallback;
   }
