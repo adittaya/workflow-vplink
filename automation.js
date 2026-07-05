@@ -79,9 +79,12 @@ process.on('SIGINT', async () => {
       || url.includes('learn_more') || url.includes('studydegree') || url.includes('studyblog');
   };
 
-  const waitForArticleButton = async (timeoutSec = 65) => {
+  const waitForArticleButton = async (timeoutSec = 65, skip = new Set()) => {
     for (let i = 0; i < timeoutSec; i++) {
-      const found = await page.evaluate(() => {
+      if (i > 0 && i % 3 === 0) {
+        await page.evaluate(() => window.scrollBy(0, 500)).catch(() => {});
+      }
+      const found = await page.evaluate((skipArr) => {
         const waitEl = document.getElementById('tp-wait1');
         const genEl = document.getElementById('tp-generate');
         if (waitEl || genEl) {
@@ -89,15 +92,29 @@ process.on('SIGINT', async () => {
             || (genEl && genEl.style.display !== 'none' && genEl.style.display !== '');
           if (!done) return null;
         }
-        if (document.getElementById('tp-snp2')?.offsetParent) return '#tp-snp2';
-        if (document.getElementById('cross-snp2')?.offsetParent && document.getElementById('cross-snp2')?.style.display !== 'none') return '#cross-snp2';
-        if (document.getElementById('btn6')?.offsetParent) return '#btn6';
-        const btn7 = document.querySelector('#btn7 > button');
-        if (btn7?.offsetParent && btn7.style.display !== 'none') return '#btn7 > button';
-        const anchor = document.querySelector('#main > div:nth-child(4) > center > center > a');
-        if (anchor?.offsetParent) return 'anchor';
+        const checks = [
+          '#tp-snp2',
+          '#cross-snp2',
+          '#btn6',
+          '#btn7 > button',
+          'anchor',
+        ];
+        for (const sel of checks) {
+          if (skipArr.includes(sel)) continue;
+          let el;
+          if (sel === 'anchor') {
+            el = document.querySelector('#main > div:nth-child(4) > center > center > a');
+          } else {
+            el = document.querySelector(sel);
+          }
+          if (!el) continue;
+          const visible = el.offsetParent !== null
+            && getComputedStyle(el).display !== 'none'
+            && getComputedStyle(el).visibility !== 'hidden';
+          if (visible) return sel;
+        }
         return null;
-      }).catch(() => null);
+      }, [...skip]).catch(() => null);
       if (found) return found;
       await ms(1000);
     }
@@ -174,16 +191,28 @@ process.on('SIGINT', async () => {
     }
 
     if (url.includes('onlinewish') || url.includes('krishitalk')) {
-      const overlay = await page.evaluate(() => {
-        const el = document.getElementById('common_15click_overlay');
-        return el?.offsetParent ? el : null;
-      }).catch(() => null);
-      if (overlay) {
-        await clickSel('#common_15click_overlay > div > div:nth-child(2) > div > span');
-        await ms(500);
-      }
-      const btn = await waitForArticleButton(65);
-      if (btn) {
+      const startUrl = page.url();
+      const tried = new Set();
+
+      while (page.url() === startUrl) {
+        const overlay = await page.evaluate(() => {
+          const el = document.getElementById('common_15click_overlay');
+          return el?.offsetParent ? el : null;
+        }).catch(() => null);
+        if (overlay) {
+          await clickSel('#common_15click_overlay > div > div:nth-child(2) > div > span');
+          await ms(500);
+        }
+
+        const btn = await waitForArticleButton(65, tried);
+        if (!btn) {
+          await clickText('Continue');
+          console.log('  clicked text Continue');
+          await ms(5000);
+          if (page.url() === startUrl) break;
+          continue;
+        }
+
         const label = btn;
         if (btn === '#btn6') {
           await clickSel('#btn6');
@@ -193,16 +222,20 @@ process.on('SIGINT', async () => {
             if (await clickSel('#btn7 > button')) { console.log('  clicked Continue (btn7)'); break; }
             await ms(1000);
           }
+          await ms(5000);
         } else if (btn === 'anchor') {
           await clickSel('#main > div:nth-child(4) > center > center > a');
+          console.log('  clicked anchor');
+          await ms(5000);
         } else {
           await clickSel(btn);
+          console.log(`  clicked ${label}`);
+          await ms(5000);
         }
-        console.log(`  clicked ${label}`);
-        await ms(5000);
-      } else {
-        await clickText('Continue');
-        await ms(5000);
+
+        if (page.url() === startUrl) {
+          tried.add(btn);
+        }
       }
       continue;
     }

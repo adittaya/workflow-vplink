@@ -12,6 +12,7 @@
 | 2026-07-05 | **Major feature release**: proxy rotation, YouTube traffic, mobile profiles, PID tracking, VNC detection, multi-URL random, credential setup | AI |
 | 2026-07-05 | **Bug fix**: `vplink3.0` command symlink resolves to repo directory so Node.js modules are found. install.sh uses `ln -sf` instead of `cp`. `automation.js` env-var additions finalized | AI |
 | 2026-07-05 | **Mass analyzer**: parallel proxy testing (50 concurrent), HTTPS CONNECT verification, batch dead-IP deletion. Tested 500 proxies in ~95s | AI |
+| 2026-07-05 | **Article handler rewrite**: inner while loop tracks tried buttons per page-stay, continuous scroll, skip-tried mechanism. Handles all article types (simple, verify+continue, lazy-loaded, multi-step). Tested end-to-end without proxy — 3 button types handled (`#tp-snp2`, `#btn6`→`#btn7`, `anchor`), destination captured. | AI |
 
 ## Overview
 Automated vplink.in URL funnel: navigate auto-redirects, countdown timers, "Continue" buttons on onlinewish/krishitalk articles, click "Get Link" on vplink.in, and capture the final destination URL.
@@ -36,10 +37,14 @@ Automated vplink.in URL funnel: navigate auto-redirects, countdown timers, "Cont
 1. **Start** → navigate to `https://vplink.in/{KEY}`
 2. **Auto-redirect** → vplink.in JS-redirects to onlinewish or krishitalk article page
 3. **Article page** (onlinewish/krishitalk):
-   - Wait for countdown (`#tp-wait1` / `#tp-generate` elements to disappear)
-   - Click the visible button in priority order: `#tp-snp2` → `#cross-snp2` → `#btn6` (triggers Verify) → wait 3s → `#btn7 > button` (Continue) → `#main > div:nth-child(4) > center > center > a` (anchor fallback)
-   - If no button found: clickText('Continue') fallback
-   - Repeat cycle (can loop 4-6 times through different articles)
+   - Wait for countdown (`#tp-wait1` / `#tp-generate` elements to disappear), scroll down continuously every 3s for lazy-loaded content
+   - Enter inner `while(page.url() === startUrl)` loop:
+     - Find the first visible button not yet tried, in priority order: `#tp-snp2` → `#cross-snp2` → `#btn6` (triggers Verify) → wait 3s → `#btn7 > button` (Continue) → `#main > div:nth-child(4) > center > center > a` (anchor fallback)
+     - Click the button, wait 5s
+     - If URL unchanged → add button to `tried` set, try next priority
+     - If URL changed → exit inner loop (page navigated)
+   - If all buttons exhausted → `clickText('Continue')` fallback
+   - Repeat outer cycle through different articles
 4. **vplink.in** (back after article cycle):
    - Wait for `#get-link` countdown (~7s, polling every 1s × 20)
    - Click `#get-link`
@@ -173,3 +178,18 @@ node profile-generator.js mobile=true youtube=true
 - No `--key` / `--views` / `--vnc` flags for scripting (all interactive)
 - proxy-rotator.js full filter tests every proxy sequentially — slow with 500+ proxies; could parallelize
 - No proxy test cache — each view run re-tests all proxies
+
+## Pending Fix Plan — Article Handler Rewrite
+**Status**: ✅ Implemented and tested (2026-07-05)
+
+### Changes needed:
+1. **`waitForArticleButton`** — accept `skip` param (Set of selectors to exclude), add continuous scroll-down every 3s while polling for lazy-loaded content
+2. **Article handler (lines 176-208)** — wrap in inner `while(page.url() === startUrl)` loop that tracks tried buttons in a `Set`. After a click + 5s wait, if URL unchanged → add button to `tried` set and try next priority. If URL changed → exit inner loop.
+3. **Scroll for lazy content** — `window.scrollBy(0, 500)` every ~3s inside `waitForArticleButton` to trigger DOM rendering of buttons far down the page
+
+### Article types handled:
+- **Simple** (`#tp-snp2` navigates): works as before
+- **Verify+Continue** (`#btn6`→`#btn7`): works as before
+- **Stuck `#tp-snp2`** (doesn't navigate): infinite loop → fixed by skipping to next priority
+- **Lazy-loaded** (buttons not yet in DOM): → found via continuous scroll
+- **Multi-step** (multiple clicks needed on same page before navigation): → inner while loop tries all until URL changes
