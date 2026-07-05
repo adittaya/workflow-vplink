@@ -153,45 +153,51 @@ process.on('SIGINT', async () => {
 
       if (hasBtn) {
         console.log('  waiting for Get Link countdown...');
-        for (let i = 0; i < 20; i++) {
-          const ready = await page.evaluate(() => {
-            const el = document.getElementById('get-link');
-            return el && !el.classList.contains('disabled');
-          }).catch(() => false);
-          if (ready) break;
-          await ms(1000);
-        }
-        console.log('  clicking Get Link...');
-        const newTabPromise = context.waitForEvent('page', { timeout: 15000 }).catch(() => null);
-        await clickSel('#get-link');
-        const newTab = await newTabPromise;
-        if (newTab) {
-          console.log('  new tab opened, waiting for destination URL...');
-          try {
-            await newTab.waitForLoadState('domcontentloaded', { timeout: 15000 });
-            await ms(3000);
-            const tabUrl = newTab.url();
-            console.log(`  new tab URL: ${tabUrl.substring(0, 100)}`);
-            if (tabUrl && !tabUrl.includes('about:blank') && !tabUrl.includes('chrome-error') && !tabUrl.includes('vplink')) {
-              destinationUrl = tabUrl;
-            }
-          } catch (e) {
-            console.log(`  new tab error: ${e.message.substring(0, 50)}`);
+        try {
+          for (let i = 0; i < 20; i++) {
+            const ready = await page.evaluate(() => {
+              const el = document.getElementById('get-link');
+              return el && !el.classList.contains('disabled');
+            }).catch(() => false);
+            if (ready) break;
+            await ms(1000);
           }
-          await newTab.close().catch(() => {});
-        } else {
-          console.log('  no new tab, checking current page...');
+          console.log('  clicking Get Link...');
+          const newTabPromise = context.waitForEvent('page', { timeout: 15000 }).catch(() => null);
+          await clickSel('#get-link');
+          const newTab = await newTabPromise;
+          if (newTab) {
+            console.log('  new tab opened, waiting for destination URL...');
+            try {
+              await newTab.waitForLoadState('domcontentloaded', { timeout: 15000 });
+              await ms(3000);
+              const tabUrl = newTab.url();
+              console.log(`  new tab URL: ${tabUrl.substring(0, 100)}`);
+              if (tabUrl && !tabUrl.includes('about:blank') && !tabUrl.includes('chrome-error') && !tabUrl.includes('vplink')) {
+                destinationUrl = tabUrl;
+              }
+            } catch (e) {
+              console.log(`  new tab error: ${e.message.substring(0, 50)}`);
+            }
+            await newTab.close().catch(() => {});
+          } else {
+            console.log('  no new tab, checking current page...');
+          }
+        } catch (e) {
+          console.log(`  Get Link interrupted: ${e.message.substring(0, 50)}`);
         }
         // Fallback: check current page
         if (!destinationUrl) {
           const cur = page.url();
           for (let i = 0; i < 25; i++) {
+            try {
+              if (page.url() !== cur && !page.url().includes('vplink')) {
+                destinationUrl = page.url(); break;
+              }
+            } catch {}
             await ms(1000);
-            if (page.url() !== cur && !page.url().includes('vplink')) {
-              destinationUrl = page.url(); break;
-            }
           }
-          if (!destinationUrl) destinationUrl = page.url();
+          try { if (!destinationUrl) destinationUrl = page.url(); } catch {}
         }
         break;
       }
