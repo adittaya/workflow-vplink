@@ -32,83 +32,94 @@ async function deleteProxy(ip, port) {
   return resp.ok;
 }
 
-// Test proxy via HTTPS CONNECT + HTTP download speed
+// Test proxy — tries HTTPS CONNECT first, falls back to HTTP absolute-form URI
 async function testProxy(proxy) {
-  return new Promise((resolve) => {
-    const start = Date.now();
-    const done = (result) => {
-      clearTimeout(timer);
-      resolve(result);
-    };
-    const timer = setTimeout(() => done(null), 15000);
-    try {
-      // Step 1: CONNECT tunnel to httpbin.org:443
-      const connReq = http.request({
-        hostname: proxy.ip,
-        port: proxy.port,
-        method: 'CONNECT',
-        path: 'httpbin.org:443',
-        timeout: 8000,
-      });
-      connReq.on('connect', (res, socket) => {
-        // Step 2: HTTPS request through the tunnel (/ip)
-        const opts = {
-          socket,
-          hostname: 'httpbin.org',
-          path: '/ip',
-          method: 'GET',
-          headers: { 'Host': 'httpbin.org', 'User-Agent': 'curl/8.0' },
-          timeout: 6000,
-          rejectUnauthorized: false,
-        };
-        const tlsReq = https.request(opts, (tlsRes) => {
-          let data = '';
-          tlsRes.on('data', (chunk) => data += chunk);
-          tlsRes.on('end', () => {
-            try {
-              const json = JSON.parse(data);
-              if (!json || !json.origin) { return done(null); }
-              // Step 3: HTTP speed test via proxy (absolute-form URI)
-              const speedReq = http.request({
-                hostname: proxy.ip,
-                port: proxy.port,
-                path: 'http://speedtest.tele2.net/100KB.zip',
-                method: 'GET',
-                headers: { 'Host': 'speedtest.tele2.net', 'User-Agent': 'curl/8.0' },
-                timeout: 10000,
-              }, (sr) => {
-                let downloaded = 0;
-                const speedStart = Date.now();
-                sr.on('data', (chunk) => downloaded += chunk.length);
-                sr.on('end', () => {
-                  const speedTime = (Date.now() - speedStart) / 1000;
-                  const speed = speedTime > 0 ? (downloaded / speedTime / 1024) : 0;
-                  done({
-                    ...proxy,
-                    latency_ms: Date.now() - start,
-                    origin: json.origin,
-                    speed_kbps: Math.round(speed),
-                  });
-                });
-              });
-              speedReq.on('error', () => done({ ...proxy, latency_ms: Date.now() - start, origin: json.origin, speed_kbps: 0 }));
-              speedReq.on('timeout', () => { speedReq.destroy(); done({ ...proxy, latency_ms: Date.now() - start, origin: json.origin, speed_kbps: 0 }); });
-              speedReq.end();
-            } catch { done(null); }
-          });
+  const start = Date.now();
+  const result = { ...proxy, latency_ms: 0, origin: '', speed_kbps: 0 };
+
+  const tryConnect = () => new Promise((resolve) => {
+    const connReq = http.request({
+      hostname: proxy.ip, port: proxy.port,
+      method: 'CONNECT', path: 'httpbin.org:443',
+      timeout: 8000,
+    });
+    connReq.on('connect', (res, socket) => {
+      const tlsReq = https.request({
+        socket, hostname: 'httpbin.org', path: '/ip',
+        method: 'GET', headers: { 'Host': 'httpbin.org' },
+        timeout: 6000, rejectUnauthorized: false,
+      }, (tlsRes) => {
+        let data = '';
+        tlsRes.on('data', (chunk) => data += chunk);
+        tlsRes.on('end', () => {
+          try {
+            const json = JSON.parse(data);
+            resolve(json && json.origin ? json.origin : null);
+          } catch { resolve(null); }
         });
-        tlsReq.on('error', () => done(null));
-        tlsReq.on('timeout', () => { tlsReq.destroy(); done(null); });
-        tlsReq.end();
       });
-      connReq.on('error', () => done(null));
-      connReq.on('timeout', () => { connReq.destroy(); done(null); });
-      connReq.end();
-    } catch { done(null); }
+      tlsReq.on('error', () => resolve(null));
+      tlsReq.on('timeout', () => { tlsReq.destroy(); resolve(null); });
+      tlsReq.end();
+    });
+    connReq.on('error', () => resolve(null));
+    connReq.on('timeout', () => { connReq.destroy(); resolve(null); });
+    connReq.end();
   });
+
+  const tryHttp = () => new Promise((resolve) => {
+    const req = http.request({
+      hostname: proxy.ip, port: proxy.port,
+      path: 'http://httpbin.org/ip', method: 'GET',
+      headers: { 'Host': 'httpbin.org' }, timeout: 8000,
+    }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => data += chunk);
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          resolve(json && json.origin ? json.origin : null);
+        } catch { resolve(null); }
+      });
+    });
+    req.on('error', () => resolve(null));
+    req.on('timeout', () => { req.destroy(); resolve(null); });
+    req.end();
+  });
+
+  // Try HTTPS CONNECT first, fall back to HTTP
+  let origin = await tryConnect();
+  if (!origin) origin = await tryHttp();
+  if (!origin) return null;
+
+  result.origin = origin;
+  result.latency_ms = Date.now() - start;
+
+  // Speed test: download 100KB via whichever method works
+  try {
+    const speedStart = Date.now();
+    const resp = await new Promise((resolve) => {
+      const req = http.request({
+        hostname: proxy.ip, port: proxy.port,
+        path: 'http://speedtest.tele2.net/100KB.zip', method: 'GET',
+        headers: { 'Host': 'speedtest.tele2.net' }, timeout: 10000,
+      }, (res) => {
+        let total = 0;
+        res.on('data', (chunk) => total += chunk.length);
+        res.on('end', () => resolve(total));
+      });
+      req.on('error', () => resolve(0));
+      req.on('timeout', () => { req.destroy(); resolve(0); });
+      req.end();
+    });
+    const speedTime = (Date.now() - speedStart) / 1000;
+    result.speed_kbps = speedTime > 0 ? Math.round(resp / speedTime / 1024) : 0;
+  } catch {}
+
+  return result;
 }
 
-async function filterAndClean(tier = 'premium', concurrency = 50) {
+async function filterAndClean(tier = 'premium', concurrency = 50, deleteDead = false) {
   console.error('  [Proxy] Fetching proxies from Supabase...');
   const proxies = await fetchProxies(tier);
   console.error(`  [Proxy] Found ${proxies.length} ${tier} proxies`);
@@ -133,9 +144,8 @@ async function filterAndClean(tier = 'premium', concurrency = 50) {
   }
   process.stderr.write('\n');
 
-  if (results.dead.length > 0) {
+  if (deleteDead && results.dead.length > 0) {
     console.error(`  [Proxy] Deleting ${results.dead.length} dead proxies...`);
-    // Batch delete dead proxies in parallel (25 at a time)
     for (let i = 0; i < results.dead.length; i += 25) {
       const batch = results.dead.slice(i, i + 25);
       await Promise.allSettled(batch.map(p => deleteProxy(p.ip, p.port)));
@@ -175,7 +185,7 @@ function getRotationIndex(proxies, history) {
 }
 
 async function getProxy(tier = 'premium') {
-  const proxies = await filterAndClean(tier);
+  const proxies = await filterAndClean(tier, 50, false); // don't delete dead proxies
   if (proxies.length === 0) {
     console.error('  [Proxy] No working proxies found');
     return null;
@@ -215,21 +225,32 @@ async function getProxyQuick(tier = 'premium') {
   return picked;
 }
 
-// CLI: node proxy-rotator.js <tier> [--quick]
+// CLI: node proxy-rotator.js <tier> [--quick|--purge]
+// --quick: fetch without live test (use DB status only)
+// --purge: test AND delete dead proxies from database
 // Outputs: ip:port (on stdout), all status messages go to stderr
 if (require.main === module) {
   const tier = process.argv[2] || 'premium';
-  const quick = process.argv.includes('--quick');
-  const fn = quick ? getProxyQuick : getProxy;
-  fn(tier).then(p => {
-    if (p) {
-      console.log(`${p.ip}:${p.port}`);
-    }
-    process.exit(p ? 0 : 1);
-  }).catch(e => {
-    console.error('  [Proxy] Error:', e.message);
-    process.exit(1);
-  });
+  const purge = process.argv.includes('--purge');
+  const quick = process.argv.includes('--quick') || process.argv.includes('--purge');
+
+  if (purge) {
+    // Full test + delete dead proxies
+    filterAndClean(tier, 50, true).then(working => {
+      if (working.length > 0) {
+        working.sort((a, b) => (b.speed_kbps || 0) - (a.speed_kbps || 0) || (a.latency_ms || 9999) - (b.latency_ms || 9999));
+        console.log(`${working[0].ip}:${working[0].port}`);
+        console.error(`  [Proxy] Best: ${working[0].ip}:${working[0].port} (${working[0].speed_kbps || '?'} KB/s, ${working[0].latency_ms}ms)`);
+      }
+      process.exit(working.length > 0 ? 0 : 1);
+    }).catch(e => { console.error('  [Proxy] Error:', e.message); process.exit(1); });
+  } else {
+    const fn = quick ? getProxyQuick : getProxy;
+    fn(tier).then(p => {
+      if (p) console.log(`${p.ip}:${p.port}`);
+      process.exit(p ? 0 : 1);
+    }).catch(e => { console.error('  [Proxy] Error:', e.message); process.exit(1); });
+  }
 }
 
 module.exports = { getProxy, getProxyQuick, filterAndClean, fetchProxies, testProxy };
