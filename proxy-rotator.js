@@ -172,8 +172,8 @@ async function filterAndClean(tier = 'premium', concurrency = 50, deleteDead = f
 
   if (deleteDead && results.dead.length > 0) {
     console.error(`  [Proxy] Deleting ${results.dead.length} dead proxies...`);
-    for (let i = 0; i < results.dead.length; i += 25) {
-      const batch = results.dead.slice(i, i + 25);
+    for (let i = 0; i < results.dead.length; i += 50) {
+      const batch = results.dead.slice(i, i + 50);
       await Promise.allSettled(batch.map(p => deleteProxy(p.ip, p.port)));
     }
     console.error(`  [Proxy] Deleted ${results.dead.length} dead proxies`);
@@ -211,7 +211,7 @@ function getRotationIndex(proxies, history) {
 }
 
 async function getProxy(tier = 'premium') {
-  const proxies = await filterAndClean(tier, 50, false); // don't delete dead proxies
+  const proxies = await filterAndClean(tier, 50, true); // auto-delete dead proxies
   if (proxies.length === 0) {
     console.error('  [Proxy] No working proxies found');
     return null;
