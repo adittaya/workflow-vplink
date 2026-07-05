@@ -80,30 +80,49 @@ install_system_deps() {
 }
 
 # ── 1. System dependencies ──────────────────────────
-echo "[1/5] Installing system dependencies..."
+echo "[1/6] Installing system dependencies..."
 install_system_deps
 echo ""
 
 # ── 2. Node.js ──────────────────────────────────────
-echo "[2/5] Checking Node.js..."
+echo "[2/6] Checking Node.js..."
 if command -v node &>/dev/null && [ "$(node -v | cut -d. -f1 | tr -d v)" -ge 18 ]; then
   echo "  Node.js $(node -v) already installed"
 elif [ "$TERMUX" = 1 ]; then
   echo "  Installing Node.js via pkg..."
   pkg install -y nodejs
   echo "  Node.js $(node -v) installed"
-elif command -v snap &>/dev/null && $SUDO snap install node --classic 2>/dev/null; then
-  echo "  Node.js $(node -v) installed via snap"
 else
-  echo "  Installing Node.js via nodesource..."
-  curl -fsSL https://deb.nodesource.com/setup_20.x | $SUDO -E bash - &>/dev/null
-  $SUDO apt install -y -qq nodejs &>/dev/null
+  PKG_MANAGER=$(detect_pkg_manager)
+  echo "  Installing Node.js via $PKG_MANAGER..."
+  case "$PKG_MANAGER" in
+    apt)
+      curl -fsSL https://deb.nodesource.com/setup_20.x | $SUDO -E bash - 2>&1 | tail -1
+      $SUDO apt install -y -qq nodejs
+      ;;
+    yum|dnf)
+      $SUDO $PKG_MANAGER install -y nodejs 2>&1 | tail -1
+      ;;
+    pacman)
+      $SUDO pacman -Sy --noconfirm nodejs npm 2>&1 | tail -1
+      ;;
+    zypper)
+      $SUDO zypper install -y nodejs 2>&1 | tail -1
+      ;;
+    apk)
+      $SUDO apk add nodejs npm 2>&1 | tail -1
+      ;;
+    *)
+      echo "  Unsupported package manager. Install Node.js >=18 manually."
+      exit 1
+      ;;
+  esac
   echo "  Node.js $(node -v) installed"
 fi
 echo ""
 
 # ── 3. Clone repo ───────────────────────────────────
-echo "[3/5] Setting up VPLink 3.0..."
+echo "[3/6] Setting up VPLink 3.0..."
 if [ -d "$DIR" ]; then
   echo "  Updating existing installation..."
   cd "$DIR" && git pull
@@ -115,7 +134,7 @@ cd "$DIR"
 echo ""
 
 # ── 4. Install npm dependencies & Playwright ────────
-echo "[4/5] Installing Playwright + browsers..."
+echo "[4/6] Installing Playwright + browsers..."
 if [ "$TERMUX" = 1 ]; then
   # Termux: use playwright-core + system Chromium
   npm install playwright-core 2>&1 | tail -2
@@ -132,8 +151,8 @@ if [ "$TERMUX" = 1 ]; then
   ln -sf "$DIR/vplink3.0.sh" "$PREFIX/bin/vplink3.0"
   chmod +x "$PREFIX/bin/vplink3.0"
 else
-  ln -sf "$DIR/vplink3.0.sh" /usr/local/bin/vplink3.0
-  chmod +x /usr/local/bin/vplink3.0
+  $SUDO ln -sf "$DIR/vplink3.0.sh" /usr/local/bin/vplink3.0
+  $SUDO chmod +x /usr/local/bin/vplink3.0
 fi
 echo "  Symlinked to $DIR/vplink3.0.sh"
 
