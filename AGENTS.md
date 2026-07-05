@@ -11,6 +11,7 @@
 | 2026-07-05 | CLI improvements: confirmation step, unique result summary, safer Xvfb cleanup, key retry loop | AI |
 | 2026-07-05 | **Major feature release**: proxy rotation, YouTube traffic, mobile profiles, PID tracking, VNC detection, multi-URL random, credential setup | AI |
 | 2026-07-05 | **Bug fix**: `vplink3.0` command symlink resolves to repo directory so Node.js modules are found. install.sh uses `ln -sf` instead of `cp`. `automation.js` env-var additions finalized | AI |
+| 2026-07-05 | **Mass analyzer**: parallel proxy testing (50 concurrent), HTTPS CONNECT verification, batch dead-IP deletion. Tested 500 proxies in ~95s | AI |
 
 ## Overview
 Automated vplink.in URL funnel: navigate auto-redirects, countdown timers, "Continue" buttons on onlinewish/krishitalk articles, click "Get Link" on vplink.in, and capture the final destination URL.

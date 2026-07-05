@@ -1,4 +1,6 @@
 const config = require('./config');
+const http = require('http');
+const https = require('https');
 
 const SUPABASE_REST = '/rest/v1';
 
@@ -16,7 +18,7 @@ function supabaseFetch(endpoint, options = {}) {
 
 async function fetchProxies(tier = 'premium') {
   const field = tier === 'premium' ? 'vplink_ok' : 'e2_ok';
-  const url = `/proxy_results?select=ip,port,protocol,country,latency_ms&${field}=eq.true&order=latency_ms.asc&limit=500`;
+  const url = `/proxy_results?select=ip,port,proto,country,latency_ms&${field}=eq.true&order=latency_ms.asc&limit=500`;
   const resp = await supabaseFetch(url);
   if (!resp.ok) {
     throw new Error(`Supabase query failed: ${resp.status} ${await resp.text().catch(() => '')}`);
@@ -30,55 +32,97 @@ async function deleteProxy(ip, port) {
   return resp.ok;
 }
 
+// Test proxy via HTTPS CONNECT (what Playwright/browsers use)
 async function testProxy(proxy) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 8000);
-  try {
+  return new Promise((resolve) => {
     const start = Date.now();
-    const resp = await fetch('http://httpbin.org/ip', {
-      signal: controller.signal,
-      headers: { 'User-Agent': 'Mozilla/5.0' },
-    });
-    clearTimeout(timeout);
-    if (!resp.ok) return null;
-    const data = await resp.json();
-    const latency = Date.now() - start;
-    return { ...proxy, latency_ms: latency, origin: data.origin };
-  } catch {
-    clearTimeout(timeout);
-    return null;
-  }
+    const done = (result) => {
+      clearTimeout(timer);
+      resolve(result);
+    };
+    const timer = setTimeout(() => done(null), 10000);
+    try {
+      // Step 1: CONNECT tunnel to httpbin.org:443
+      const connReq = http.request({
+        hostname: proxy.ip,
+        port: proxy.port,
+        method: 'CONNECT',
+        path: 'httpbin.org:443',
+        timeout: 8000,
+      });
+      connReq.on('connect', (res, socket) => {
+        // Step 2: HTTPS request through the tunnel
+        const opts = {
+          socket,
+          hostname: 'httpbin.org',
+          path: '/ip',
+          method: 'GET',
+          headers: { 'Host': 'httpbin.org', 'User-Agent': 'curl/8.0' },
+          timeout: 8000,
+          rejectUnauthorized: false,
+        };
+        const tlsReq = https.request(opts, (tlsRes) => {
+          let data = '';
+          tlsRes.on('data', (chunk) => data += chunk);
+          tlsRes.on('end', () => {
+            try {
+              const json = JSON.parse(data);
+              if (json && json.origin) {
+                done({ ...proxy, latency_ms: Date.now() - start, origin: json.origin });
+              } else {
+                done(null);
+              }
+            } catch { done(null); }
+          });
+        });
+        tlsReq.on('error', () => done(null));
+        tlsReq.on('timeout', () => { tlsReq.destroy(); done(null); });
+        tlsReq.end();
+      });
+      connReq.on('error', () => done(null));
+      connReq.on('timeout', () => { connReq.destroy(); done(null); });
+      connReq.end();
+    } catch { done(null); }
+  });
 }
 
-async function filterAndClean(tier = 'premium') {
+async function filterAndClean(tier = 'premium', concurrency = 50) {
   console.error('  [Proxy] Fetching proxies from Supabase...');
   const proxies = await fetchProxies(tier);
   console.error(`  [Proxy] Found ${proxies.length} ${tier} proxies`);
 
-  const working = [];
-  const dead = [];
+  const results = { working: [], dead: [] };
+  let completed = 0;
 
-  for (let i = 0; i < proxies.length; i++) {
-    const p = proxies[i];
-    process.stderr.write(`  [Proxy] Testing ${p.ip}:${p.port} (${i + 1}/${proxies.length})\r`);
-    const result = await testProxy(p);
-    if (result) {
-      working.push(result);
-    } else {
-      dead.push(p);
+  // Test proxies in parallel batches
+  for (let i = 0; i < proxies.length; i += concurrency) {
+    const batch = proxies.slice(i, i + concurrency);
+    const outcomes = await Promise.allSettled(batch.map(p => testProxy(p)));
+    for (let j = 0; j < batch.length; j++) {
+      const result = outcomes[j].status === 'fulfilled' ? outcomes[j].value : null;
+      if (result) {
+        results.working.push(result);
+      } else {
+        results.dead.push(batch[j]);
+      }
     }
+    completed += batch.length;
+    process.stderr.write(`  [Proxy] Tested ${completed}/${proxies.length} (${results.working.length} working)\r`);
   }
   process.stderr.write('\n');
 
-  if (dead.length > 0) {
-    console.error(`  [Proxy] Deleting ${dead.length} dead proxies...`);
-    for (const p of dead) {
-      try { await deleteProxy(p.ip, p.port); } catch {}
+  if (results.dead.length > 0) {
+    console.error(`  [Proxy] Deleting ${results.dead.length} dead proxies...`);
+    // Batch delete dead proxies in parallel (25 at a time)
+    for (let i = 0; i < results.dead.length; i += 25) {
+      const batch = results.dead.slice(i, i + 25);
+      await Promise.allSettled(batch.map(p => deleteProxy(p.ip, p.port)));
     }
+    console.error(`  [Proxy] Deleted ${results.dead.length} dead proxies`);
   }
 
-  console.error(`  [Proxy] ${working.length} working proxies available`);
-  return working;
+  console.error(`  [Proxy] ${results.working.length} working proxies available`);
+  return results.working;
 }
 
 function getRotationIndex(proxies, history) {
