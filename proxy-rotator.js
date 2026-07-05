@@ -32,7 +32,7 @@ async function deleteProxy(ip, port) {
   return resp.ok;
 }
 
-// Test proxy via HTTPS CONNECT (what Playwright/browsers use)
+// Test proxy via HTTPS CONNECT + HTTP download speed
 async function testProxy(proxy) {
   return new Promise((resolve) => {
     const start = Date.now();
@@ -40,7 +40,7 @@ async function testProxy(proxy) {
       clearTimeout(timer);
       resolve(result);
     };
-    const timer = setTimeout(() => done(null), 10000);
+    const timer = setTimeout(() => done(null), 15000);
     try {
       // Step 1: CONNECT tunnel to httpbin.org:443
       const connReq = http.request({
@@ -51,14 +51,14 @@ async function testProxy(proxy) {
         timeout: 8000,
       });
       connReq.on('connect', (res, socket) => {
-        // Step 2: HTTPS request through the tunnel
+        // Step 2: HTTPS request through the tunnel (/ip)
         const opts = {
           socket,
           hostname: 'httpbin.org',
           path: '/ip',
           method: 'GET',
           headers: { 'Host': 'httpbin.org', 'User-Agent': 'curl/8.0' },
-          timeout: 8000,
+          timeout: 6000,
           rejectUnauthorized: false,
         };
         const tlsReq = https.request(opts, (tlsRes) => {
@@ -67,11 +67,33 @@ async function testProxy(proxy) {
           tlsRes.on('end', () => {
             try {
               const json = JSON.parse(data);
-              if (json && json.origin) {
-                done({ ...proxy, latency_ms: Date.now() - start, origin: json.origin });
-              } else {
-                done(null);
-              }
+              if (!json || !json.origin) { return done(null); }
+              // Step 3: HTTP speed test via proxy (absolute-form URI)
+              const speedReq = http.request({
+                hostname: proxy.ip,
+                port: proxy.port,
+                path: 'http://speedtest.tele2.net/100KB.zip',
+                method: 'GET',
+                headers: { 'Host': 'speedtest.tele2.net', 'User-Agent': 'curl/8.0' },
+                timeout: 10000,
+              }, (sr) => {
+                let downloaded = 0;
+                const speedStart = Date.now();
+                sr.on('data', (chunk) => downloaded += chunk.length);
+                sr.on('end', () => {
+                  const speedTime = (Date.now() - speedStart) / 1000;
+                  const speed = speedTime > 0 ? (downloaded / speedTime / 1024) : 0;
+                  done({
+                    ...proxy,
+                    latency_ms: Date.now() - start,
+                    origin: json.origin,
+                    speed_kbps: Math.round(speed),
+                  });
+                });
+              });
+              speedReq.on('error', () => done({ ...proxy, latency_ms: Date.now() - start, origin: json.origin, speed_kbps: 0 }));
+              speedReq.on('timeout', () => { speedReq.destroy(); done({ ...proxy, latency_ms: Date.now() - start, origin: json.origin, speed_kbps: 0 }); });
+              speedReq.end();
             } catch { done(null); }
           });
         });
@@ -122,6 +144,14 @@ async function filterAndClean(tier = 'premium', concurrency = 50) {
   }
 
   console.error(`  [Proxy] ${results.working.length} working proxies available`);
+  if (results.working.length > 0) {
+    // Show speed breakdown
+    const fast = results.working.filter(p => p.speed_kbps >= 100).length;
+    const medium = results.working.filter(p => p.speed_kbps >= 50 && p.speed_kbps < 100).length;
+    const slow = results.working.filter(p => p.speed_kbps > 0 && p.speed_kbps < 50).length;
+    const untested = results.working.filter(p => !p.speed_kbps).length;
+    console.error(`  [Proxy] Speed: ${fast} fast, ${medium} medium, ${slow} slow, ${untested} untested`);
+  }
   return results.working;
 }
 
@@ -151,14 +181,24 @@ async function getProxy(tier = 'premium') {
     return null;
   }
 
+  // Prefer faster proxies: sort by speed descending (faster first), then latency ascending
+  proxies.sort((a, b) => {
+    const aSpeed = a.speed_kbps || 0;
+    const bSpeed = b.speed_kbps || 0;
+    if (bSpeed !== aSpeed) return bSpeed - aSpeed;
+    return (a.latency_ms || 9999) - (b.latency_ms || 9999);
+  });
+
   const history = config.loadProxyHistory();
   const picked = getRotationIndex(proxies, history);
   if (!picked) {
     console.error('  [Proxy] All proxies used in last 24h, recycling oldest');
-    return proxies[Math.floor(Math.random() * proxies.length)];
+    const fallback = proxies[Math.floor(Math.random() * Math.min(proxies.length, 5))];
+    console.error(`  [Proxy] Selected: ${fallback.ip}:${fallback.port} (${fallback.speed_kbps || '?'} KB/s, ${fallback.latency_ms}ms)`);
+    return fallback;
   }
 
-  console.error(`  [Proxy] Selected: ${picked.ip}:${picked.port} (${picked.latency_ms}ms)`);
+  console.error(`  [Proxy] Selected: ${picked.ip}:${picked.port} (${picked.speed_kbps || '?'} KB/s, ${picked.latency_ms}ms)`);
   return picked;
 }
 
