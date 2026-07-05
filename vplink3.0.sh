@@ -242,7 +242,8 @@ for (( i=1; i<=VIEWS; i++ )); do
   if [ "$PROXY_ENABLED" = "true" ]; then
     info "Fetching proxy..."
     cd "$SCRIPT_DIR"
-    PROXY_RESULT=$($NODE_BIN "$PROXY_ROTATOR" "$PROXY_TIER" 2>/dev/null)
+    # stdout = ip:port only (all status messages go to stderr → visible to user)
+    PROXY_RESULT=$($NODE_BIN "$PROXY_ROTATOR" "$PROXY_TIER")
     if [ -n "$PROXY_RESULT" ]; then
       export VPLINK_PROXY="http://${PROXY_RESULT}"
       ok "Proxy: $VPLINK_PROXY"

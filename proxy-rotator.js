@@ -16,7 +16,7 @@ function supabaseFetch(endpoint, options = {}) {
 
 async function fetchProxies(tier = 'premium') {
   const field = tier === 'premium' ? 'vplink_ok' : 'e2_ok';
-  const url = `/proxy_results?select=*,latency_ms&${field}=eq.true&order=latency_ms.asc&limit=500`;
+  const url = `/proxy_results?select=ip,port,protocol,country,latency_ms&${field}=eq.true&order=latency_ms.asc&limit=500`;
   const resp = await supabaseFetch(url);
   if (!resp.ok) {
     throw new Error(`Supabase query failed: ${resp.status} ${await resp.text().catch(() => '')}`);
@@ -31,7 +31,6 @@ async function deleteProxy(ip, port) {
 }
 
 async function testProxy(proxy) {
-  const proxyUrl = `http://${proxy.ip}:${proxy.port}`;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8000);
   try {
@@ -52,16 +51,16 @@ async function testProxy(proxy) {
 }
 
 async function filterAndClean(tier = 'premium') {
-  console.log('  [Proxy] Fetching proxies from Supabase...');
+  console.error('  [Proxy] Fetching proxies from Supabase...');
   const proxies = await fetchProxies(tier);
-  console.log(`  [Proxy] Found ${proxies.length} ${tier} proxies`);
+  console.error(`  [Proxy] Found ${proxies.length} ${tier} proxies`);
 
   const working = [];
   const dead = [];
 
   for (let i = 0; i < proxies.length; i++) {
     const p = proxies[i];
-    process.stdout.write(`  [Proxy] Testing ${p.ip}:${p.port} (${i + 1}/${proxies.length})\r`);
+    process.stderr.write(`  [Proxy] Testing ${p.ip}:${p.port} (${i + 1}/${proxies.length})\r`);
     const result = await testProxy(p);
     if (result) {
       working.push(result);
@@ -69,16 +68,16 @@ async function filterAndClean(tier = 'premium') {
       dead.push(p);
     }
   }
-  process.stdout.write('\n');
+  process.stderr.write('\n');
 
   if (dead.length > 0) {
-    console.log(`  [Proxy] Deleting ${dead.length} dead proxies...`);
+    console.error(`  [Proxy] Deleting ${dead.length} dead proxies...`);
     for (const p of dead) {
       try { await deleteProxy(p.ip, p.port); } catch {}
     }
   }
 
-  console.log(`  [Proxy] ${working.length} working proxies available`);
+  console.error(`  [Proxy] ${working.length} working proxies available`);
   return working;
 }
 
@@ -104,18 +103,18 @@ function getRotationIndex(proxies, history) {
 async function getProxy(tier = 'premium') {
   const proxies = await filterAndClean(tier);
   if (proxies.length === 0) {
-    console.log('  [Proxy] No working proxies found');
+    console.error('  [Proxy] No working proxies found');
     return null;
   }
 
   const history = config.loadProxyHistory();
   const picked = getRotationIndex(proxies, history);
   if (!picked) {
-    console.log('  [Proxy] All proxies used in last 24h, recycling oldest');
+    console.error('  [Proxy] All proxies used in last 24h, recycling oldest');
     return proxies[Math.floor(Math.random() * proxies.length)];
   }
 
-  console.log(`  [Proxy] Selected: ${picked.ip}:${picked.port} (${picked.latency_ms}ms)`);
+  console.error(`  [Proxy] Selected: ${picked.ip}:${picked.port} (${picked.latency_ms}ms)`);
   return picked;
 }
 
@@ -133,13 +132,16 @@ async function getProxyQuick(tier = 'premium') {
 }
 
 // CLI: node proxy-rotator.js <tier> [--quick]
+// Outputs: ip:port (on stdout), all status messages go to stderr
 if (require.main === module) {
   const tier = process.argv[2] || 'premium';
   const quick = process.argv.includes('--quick');
   const fn = quick ? getProxyQuick : getProxy;
   fn(tier).then(p => {
-    if (p) console.log(`${p.ip}:${p.port}`);
-    process.exit(0);
+    if (p) {
+      console.log(`${p.ip}:${p.port}`);
+    }
+    process.exit(p ? 0 : 1);
   }).catch(e => {
     console.error('  [Proxy] Error:', e.message);
     process.exit(1);
