@@ -1,0 +1,14 @@
+[0] 07:13:10.015 NAV: https://vplink.in/UbpV2D
+[1] 07:13:10.781 302: https://vplink.in/cdn-cgi/challenge-platform/scripts/jsd/mai → /cdn-cgi/challenge-platform/h/b/scripts/jsd/80a697ecdece/mai
+[2] 07:13:11.499 NAV: https://onlinewish.in/studyblogs/educationsunivrsties/?univrsityinsurances=UbpV2D&uiso=11695
+[3] 07:13:12.570 NAV: https://onlinewish.in/studyblogs/top-5-ai-data-science-courses-canada-2026/
+[4] 07:13:13.601 CONSOLE[log]: JQMIGRATE: Migrate is installed, version 3.4.1
+[5] 07:13:13.690 NAV: https://onlinewish.in/studyblogs/top-5-ai-data-science-courses-canada-2026/#/
+[6] 07:13:13.693 NAV: https://onlinewish.in/studyblogs/top-5-ai-data-science-courses-canada-2026/
+[7] 07:13:15.250 CONSOLE[warning]: [GPT] PubAdsService.enableSingleRequest is deprecated, use googletag.setConfig({
+[8] 07:13:18.831 CONSOLE[info]: Slow network is detected. See https://www.chromestatus.com/feature/5636954674692
+[9] 07:13:18.943 CONSOLE[info]: Slow network is detected. See https://www.chromestatus.com/feature/5636954674692
+[10] 07:13:19.191 CONSOLE[info]: Powered by AMP ⚡ HTML – Version 2605071401000 https://onlinewish.in/studyblogs/t
+[11] 07:13:19.640 302: https://www.google.com/pagead/drt/ui → https://googleads.g.doubleclick.net/pagead/drt/si?st=NO_DATA
+[12] 07:13:19.645 CONSOLE[info]: Powered by AMP ⚡ HTML – Version 2605071401000 https://onlinewish.in/studyblogs/t
+[13] 07:13:20.920 CONSOLE[error]: Failed to load resource: the server responded with a status of 404 ()

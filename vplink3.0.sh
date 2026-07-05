@@ -1,7 +1,7 @@
 #!/bin/bash
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-AUTOMATION="$SCRIPT_DIR/generated_automation.js"
+AUTOMATION="$SCRIPT_DIR/automation.js"
 
 # ── Detect Termux ─────────────────────────────────────
 is_termux() {

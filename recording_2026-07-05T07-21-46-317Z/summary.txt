@@ -1,0 +1,170 @@
+[0] 07:21:51.457 NAV: https://vplink.in/UbpV2D
+[1] 07:21:52.273 302: https://vplink.in/cdn-cgi/challenge-platform/scripts/jsd/mai → /cdn-cgi/challenge-platform/h/b/scripts/jsd/80a697ecdece/mai
+[2] 07:21:53.506 NAV: https://onlinewish.in/studyblogs/educationsunivrsties/?univrsityinsurances=UbpV2D&uiso=11695
+[3] 07:21:54.709 NAV: https://onlinewish.in/studyblogs/top-5-zero-forex-markup-cards-india-2026/
+[4] 07:21:55.192 CONSOLE[log]: JQMIGRATE: Migrate is installed, version 3.4.1
+[5] 07:21:55.586 NAV: https://onlinewish.in/studyblogs/top-5-zero-forex-markup-cards-india-2026/#/
+[6] 07:21:55.587 NAV: https://onlinewish.in/studyblogs/top-5-zero-forex-markup-cards-india-2026/
+[7] 07:21:56.585 CONSOLE[warning]: [GPT] PubAdsService.enableSingleRequest is deprecated, use googletag.setConfig({
+[8] 07:22:01.145 CONSOLE[info]: Powered by AMP ⚡ HTML – Version 2605071401000 https://45993241b11937bcaa1375dce3
+[9] 07:22:01.206 CONSOLE[info]: Slow network is detected. See https://www.chromestatus.com/feature/5636954674692
+[10] 07:22:01.368 CONSOLE[info]: Slow network is detected. See https://www.chromestatus.com/feature/5636954674692
+[11] 07:22:01.459 CONSOLE[info]: Powered by AMP ⚡ HTML – Version 2605071401000 https://onlinewish.in/studyblogs/t
+[12] 07:22:02.195 CONSOLE[warning]: [amp-analytics/transport] Response unparseable or failed to send image request h
+[13] 07:22:02.994 CONSOLE[error]: Failed to load resource: the server responded with a status of 404 ()
+[14] 07:22:12.398 CLICK: #common_15click_overlay:nth-child(18) "Visit siteNoYes" (228,75)
+[15] 07:22:19.035 CLICK: #common_15click_overlay > div > div:nth-child(2) > div > span "No" (338,152)
+[16] 07:22:22.886 NAV: https://www.agentweave.ai/?gad_source=5&gad_campaignid=23754406290&gclid=EAIaIQobChMI9aGMnIC7lQMV8ousAh3HvyquEAEYASAAEgIxZvD_BwE
+[17] 07:22:23.527 CONSOLE[debug]: Using extensionId: @EXTENSION_ID@
+[18] 07:22:23.546 CONSOLE[log]: [Main] DCV worker path set to: /dcvjs/dcv/
+[19] 07:22:23.768 NAV: https://www.agentweave.ai/?gad_source=5&gad_campaignid=23754406290&gclid=EAIaIQobChMI9aGMnIC7lQMV8ousAh3HvyquEAEYASAAEgIxZvD_BwE
+[20] 07:22:29.283 NAV: https://onlinewish.in/studyblogs/top-5-zero-forex-markup-cards-india-2026/
+[21] 07:22:29.500 CONSOLE[log]: JQMIGRATE: Migrate is installed, version 3.4.1
+[22] 07:22:29.523 NAV: https://onlinewish.in/studyblogs/top-5-zero-forex-markup-cards-india-2026/#/
+[23] 07:22:29.529 NAV: https://onlinewish.in/studyblogs/top-5-zero-forex-markup-cards-india-2026/
+[24] 07:22:30.143 CONSOLE[warning]: [GPT] PubAdsService.enableSingleRequest is deprecated, use googletag.setConfig({
+[25] 07:22:30.980 CONSOLE[error]: Failed to load resource: net::ERR_CONNECTION_CLOSED
+[26] 07:22:30.996 CONSOLE[error]: Failed to load resource: net::ERR_CONNECTION_CLOSED
+[27] 07:22:31.004 CONSOLE[error]: Failed to load resource: net::ERR_CONNECTION_CLOSED
+[28] 07:22:31.007 CONSOLE[error]: Failed to load resource: net::ERR_CONNECTION_CLOSED
+[29] 07:22:33.115 CONSOLE[info]: Powered by AMP ⚡ HTML – Version 2605071401000 https://onlinewish.in/studyblogs/t
+[30] 07:22:33.170 CONSOLE[info]: Slow network is detected. See https://www.chromestatus.com/feature/5636954674692
+[31] 07:22:58.388 SCROLL: (0,2)
+[32] 07:22:59.393 SCROLL: (0,1929)
+[33] 07:23:00.406 SCROLL: (0,5151)
+[34] 07:23:01.425 SCROLL: (0,8182)
+[35] 07:23:02.440 SCROLL: (0,11092)
+[36] 07:23:03.454 SCROLL: (0,14168)
+[37] 07:23:07.005 CLICK: #main > div:nth-child(4) > center > center > a "Continue" (418,613)
+[38] 07:23:07.896 NAV: https://onlinewish.in/studyblogs/learn_more.php
+[39] 07:23:08.740 NAV: https://krishitalk.com/educatehub/studydegree/?degreehubs=UbpV2D
+[40] 07:23:09.692 NAV: https://krishitalk.com/educatehub/health-insurance-for-families-complete-guide-to-saving-money/
+[41] 07:23:10.381 NAV: https://krishitalk.com/educatehub/health-insurance-for-families-complete-guide-to-saving-money/#/
+[42] 07:23:10.381 NAV: https://krishitalk.com/educatehub/health-insurance-for-families-complete-guide-to-saving-money/
+[43] 07:23:10.386 CONSOLE[info]: Slow network is detected. See https://www.chromestatus.com/feature/5636954674692
+[44] 07:23:10.439 CONSOLE[info]: Slow network is detected. See https://www.chromestatus.com/feature/5636954674692
+[45] 07:23:10.929 CONSOLE[warning]: [GPT] PubAdsService.enableSingleRequest is deprecated, use googletag.setConfig({
+[46] 07:23:12.976 CONSOLE[info]: Slow network is detected. See https://www.chromestatus.com/feature/5636954674692
+[47] 07:23:13.702 CONSOLE[info]: Powered by AMP ⚡ HTML – Version 2605071401000 https://krishitalk.com/educatehub/
+[48] 07:23:13.804 CONSOLE[info]: Powered by AMP ⚡ HTML – Version 2605071401000 https://krishitalk.com/educatehub/
+[49] 07:23:13.978 CONSOLE[info]: Powered by AMP ⚡ HTML – Version 2605071401000 https://krishitalk.com/educatehub/
+[50] 07:23:17.384 NAV: https://www.agentweave.ai/?gad_source=5&gad_campaignid=23754406290&gclid=EAIaIQobChMIt43QvoC7lQMVDKVmAh0RegQwEAEYASAAEgKNWvD_BwE
+[51] 07:23:17.824 CONSOLE[debug]: Using extensionId: @EXTENSION_ID@
+[52] 07:23:17.831 CONSOLE[log]: [Main] DCV worker path set to: /dcvjs/dcv/
+[53] 07:23:18.037 NAV: https://www.agentweave.ai/?gad_source=5&gad_campaignid=23754406290&gclid=EAIaIQobChMIt43QvoC7lQMVDKVmAh0RegQwEAEYASAAEgKNWvD_BwE
+[54] 07:23:25.412 NAV: https://krishitalk.com/educatehub/health-insurance-for-families-complete-guide-to-saving-money/
+[55] 07:23:25.625 NAV: https://krishitalk.com/educatehub/health-insurance-for-families-complete-guide-to-saving-money/#/
+[56] 07:23:25.628 NAV: https://krishitalk.com/educatehub/health-insurance-for-families-complete-guide-to-saving-money/
+[57] 07:23:25.644 CONSOLE[info]: Slow network is detected. See https://www.chromestatus.com/feature/5636954674692
+[58] 07:23:25.657 CONSOLE[info]: Slow network is detected. See https://www.chromestatus.com/feature/5636954674692
+[59] 07:23:26.145 CONSOLE[warning]: [GPT] PubAdsService.enableSingleRequest is deprecated, use googletag.setConfig({
+[60] 07:23:27.990 CONSOLE[info]: Powered by AMP ⚡ HTML – Version 2605071401000 https://krishitalk.com/educatehub/
+[61] 07:23:28.012 CONSOLE[info]: Slow network is detected. See https://www.chromestatus.com/feature/5636954674692
+[62] 07:23:28.467 CONSOLE[info]: Powered by AMP ⚡ HTML – Version 2605071401000 https://krishitalk.com/educatehub/
+[63] 07:23:42.981 SCROLL: (0,2)
+[64] 07:23:44.734 SCROLL: (0,117)
+[65] 07:23:46.475 SCROLL: (0,2)
+[66] 07:23:47.719 SCROLL: (0,123)
+[67] 07:23:50.005 SCROLL: (0,838)
+[68] 07:23:51.640 SCROLL: (0,718)
+[69] 07:23:52.655 SCROLL: (0,504)
+[70] 07:23:56.737 SCROLL: (0,485)
+[71] 07:23:57.737 SCROLL: (0,2519)
+[72] 07:23:58.753 SCROLL: (0,5834)
+[73] 07:24:04.446 CLICK: #main > div:nth-child(4) > center > center > a > #tp-snp2 "Continue" (430,176)
+[74] 07:24:05.268 NAV: https://krishitalk.com/educatehub/learn_more.php
+[75] 07:24:05.771 NAV: https://krishitalk.com/educatehub/studydegree/?degreehubs=UbpV2D
+[76] 07:24:06.764 NAV: https://krishitalk.com/educatehub/health-insurance-for-families-complete-guide-to-saving-money/
+[77] 07:24:06.863 NAV: https://krishitalk.com/educatehub/health-insurance-for-families-complete-guide-to-saving-money/#/
+[78] 07:24:06.863 NAV: https://krishitalk.com/educatehub/health-insurance-for-families-complete-guide-to-saving-money/
+[79] 07:24:07.013 CONSOLE[warning]: [GPT] PubAdsService.enableSingleRequest is deprecated, use googletag.setConfig({
+[80] 07:24:08.255 CONSOLE[info]: Powered by AMP ⚡ HTML – Version 2605071401000 https://krishitalk.com/educatehub/
+[81] 07:24:08.416 CONSOLE[info]: Powered by AMP ⚡ HTML – Version 2605071401000 https://krishitalk.com/educatehub/
+[82] 07:24:08.489 302: https://www.google.com/pagead/drt/ui → https://googleads.g.doubleclick.net/pagead/drt/si?st=NO_DATA
+[83] 07:24:08.532 302: https://www.google.com/pagead/drt/ui → https://googleads.g.doubleclick.net/pagead/drt/si?st=NO_DATA
+[84] 07:24:08.991 CONSOLE[info]: Powered by AMP ⚡ HTML – Version 2605071401000 https://krishitalk.com/educatehub/
+[85] 07:24:13.577 SCROLL: (0,2)
+[86] 07:24:14.803 SCROLL: (0,118)
+[87] 07:24:16.957 SCROLL: (0,2)
+[88] 07:24:18.293 SCROLL: (0,118)
+[89] 07:24:36.387 SCROLL: (0,2)
+[90] 07:24:37.418 SCROLL: (0,1922)
+[91] 07:24:38.435 SCROLL: (0,4922)
+[92] 07:24:39.450 SCROLL: (0,7922)
+[93] 07:24:42.513 CLICK: #main > div:nth-child(4) > center > center > a > #tp-snp2 "Continue" (463,182)
+[94] 07:24:43.046 NAV: https://krishitalk.com/educatehub/learn_more.php
+[95] 07:24:43.721 NAV: https://krishitalk.com/educatehub/studydegree/?educatinsurce=UbpV2D
+[96] 07:24:44.904 NAV: https://krishitalk.com/educatehub/best-cities-for-real-estate-investment-in-the-world/
+[97] 07:24:45.169 CONSOLE[warning]: [GPT] PubAdsService.enableSingleRequest is deprecated, use googletag.setConfig({
+[98] 07:24:46.192 NAV: https://krishitalk.com/educatehub/best-cities-for-real-estate-investment-in-the-world/#/
+[99] 07:24:46.192 NAV: https://krishitalk.com/educatehub/best-cities-for-real-estate-investment-in-the-world/
+[100] 07:24:46.352 CLICK: BODY "Skip to content		
+			
+				
+						
+					Krishi Talk
+				
+						
+								
+		
+				
+			
+								
+					Menu				
+				Contact U" (0,0)
+[101] 07:24:46.643 CONSOLE[info]: Powered by AMP ⚡ HTML – Version 2605071401000 https://krishitalk.com/educatehub/
+[102] 07:24:47.315 CLICK: BODY "Skip to content		
+			
+				
+						
+					Krishi Talk
+				
+						
+								
+		
+				
+			
+								
+					Menu				
+				Contact U" (0,0)
+[103] 07:24:47.568 CONSOLE[info]: Powered by AMP ⚡ HTML – Version 2605071401000 https://krishitalk.com/educatehub/
+[104] 07:24:47.782 CONSOLE[info]: Powered by AMP ⚡ HTML – Version 2605071401000 https://krishitalk.com/educatehub/
+[105] 07:24:48.305 CONSOLE[info]: Powered by AMP ⚡ HTML – Version 2605071401000 https://krishitalk.com/educatehub/
+[106] 07:24:49.481 SCROLL: (0,2)
+[107] 07:24:55.911 CLICK: #block-cont-1 > div:nth-child(1) "X" (454,424)
+[108] 07:25:23.035 CLICK: #main > div:nth-child(1) > center:nth-child(11) > #btn6 "Verify" (448,427)
+[109] 07:25:24.736 SCROLL: (0,482)
+[110] 07:25:25.734 SCROLL: (0,2328)
+[111] 07:25:26.779 SCROLL: (0,5402)
+[112] 07:25:27.781 SCROLL: (0,8522)
+[113] 07:25:28.783 SCROLL: (0,11520)
+[114] 07:25:29.811 SCROLL: (0,14642)
+[115] 07:25:33.744 CLICK: #btn7 > button "Continue" (455,532)
+[116] 07:25:34.716 NAV: https://krishitalk.com/educatehub/best-passive-income-ideas-that-actually-work-in-2025/
+[117] 07:25:34.883 NAV: https://krishitalk.com/educatehub/best-passive-income-ideas-that-actually-work-in-2025/#/
+[118] 07:25:34.885 NAV: https://krishitalk.com/educatehub/best-passive-income-ideas-that-actually-work-in-2025/
+[119] 07:25:35.014 CONSOLE[warning]: [GPT] PubAdsService.enableSingleRequest is deprecated, use googletag.setConfig({
+[120] 07:25:36.585 CONSOLE[info]: Powered by AMP ⚡ HTML – Version 2605071401000 https://krishitalk.com/educatehub/
+[121] 07:25:36.777 CONSOLE[info]: Powered by AMP ⚡ HTML – Version 2605071401000 https://krishitalk.com/educatehub/
+[122] 07:25:39.500 SCROLL: (0,2)
+[123] 07:25:40.746 SCROLL: (0,122)
+[124] 07:26:00.300 SCROLL: (0,362)
+[125] 07:26:01.317 SCROLL: (0,1927)
+[126] 07:26:02.333 SCROLL: (0,5132)
+[127] 07:26:03.350 SCROLL: (0,8387)
+[128] 07:26:04.365 SCROLL: (0,11454)
+[129] 07:26:06.831 CLICK: #main > div:nth-child(4) > center > center > a > #cross-snp2 "Continue" (457,166)
+[130] 07:26:06.877 SCROLL: (0,100)
+[131] 07:26:07.743 NAV: https://krishitalk.com/educatehub/learn_more.php
+[132] 07:26:09.251 NAV: https://vplink.in/UbpV2D
+[133] 07:26:09.808 CONSOLE[log]: API token not found, API call will not be initiated.
+[134] 07:26:09.835 CONSOLE[info]: Slow network is detected. See https://www.chromestatus.com/feature/5636954674692
+[135] 07:26:13.966 SCROLL: (0,2)
+[136] 07:26:15.361 SCROLL: (0,122)
+[137] 07:26:16.427 SCROLL: (0,242)
+[138] 07:26:17.671 SCROLL: (0,361)
+[139] 07:26:20.615 CLICK: div:nth-child(2) > div > div > div > div:nth-child(11) > #get-link:nth-child(1) "Get Link" (644,474)
+[140] 07:26:22.260 NAV: https://wistfulseverely.com/p6i4hgw3?key=61146d4fa83f693c56c84fbdb757b03c
+[141] 07:26:22.303 NAV: https://wistfulseverely.com/api/users?token=L3A2aTRoZ3czP2tleT0yMDFmYzIzYzdlY2EwOWQ1Y2FkOWNiYjQ2N2E2YTk0MiZzdWJtZXRyaWM9MjUwNDc4MDU
+[142] 07:26:22.304 NAV: https://wistfulseverely.com/api/users?token=L3A2aTRoZ3czP2tleT0yMDFmYzIzYzdlY2EwOWQ1Y2FkOWNiYjQ2N2E2YTk0MiZzdWJtZXRyaWM9MjUwNDc4MDU
+[143] 07:26:22.926 302: https://wistfulseverely.com/api/users?token=L3A2aTRoZ3czP2Zz → https://12indiaplay.com/
