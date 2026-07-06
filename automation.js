@@ -89,13 +89,21 @@ process.on('SIGINT', async () => {
   const DEST_PATTERNS = ['wistfulseverely.com/api/', '12indiaplay.com', 'vv53243', 'casino', 'one-',
     'apkmirror.com', 'play.google.com', 'download', '.apk'];
 
+  const knownInter = ['vplink.in', 'onlinewish', 'krishitalk', 'learn_more', 'studydegree', 'studyblog',
+    'jobskiki', 'educatehub', 'studyeducates', 'wistfulseverely.com'];
+
   const isDestination = url => {
     if (!url || !url.startsWith('http')) return false;
     if (url.includes('chrome-error') || url.includes('about:blank')) return false;
     for (const p of DEST_PATTERNS) {
       if (url.includes(p)) return true;
     }
-    return false;
+    for (const k of knownInter) {
+      if (url.includes(k)) return false;
+    }
+    // Catch-all: any unknown domain is a potential destination
+    // False positives prevented by URL stability check in doGetLink
+    return true;
   };
 
   const isArticlePage = async () => {
