@@ -46,7 +46,7 @@ process.on('SIGINT', async () => {
   page.setDefaultNavigationTimeout(60000);
 
   let destinationUrl = null;
-  const ms = t => page.waitForTimeout(t);
+  const ms = async t => { try { await page.waitForTimeout(t); } catch {} };
   const clickSel = async sel => {
     try {
       return await page.evaluate(s => {
@@ -81,10 +81,11 @@ process.on('SIGINT', async () => {
 
   const waitForArticleButton = async (timeoutSec = 65, skip = new Set()) => {
     for (let i = 0; i < timeoutSec; i++) {
-      if (i > 0 && i % 3 === 0) {
-        await page.evaluate(() => window.scrollBy(0, 500)).catch(() => {});
-      }
-      const found = await page.evaluate((skipArr) => {
+      try {
+        if (i > 0 && i % 3 === 0) {
+          await page.evaluate(() => window.scrollBy(0, 500)).catch(() => {});
+        }
+        const found = await page.evaluate((skipArr) => {
         const waitEl = document.getElementById('tp-wait1');
         const genEl = document.getElementById('tp-generate');
         if (waitEl || genEl) {
@@ -98,6 +99,13 @@ process.on('SIGINT', async () => {
           '#btn6',
           '#btn7 > button',
           'anchor',
+          '[class*="verify"]',
+          '[id*="verify"]',
+          '[class*="btn-verify"]',
+          '[class*="red"]',
+          '[style*="color: red"]',
+          '[style*="background: red"]',
+          '[style*="background-color: red"]',
         ];
         for (const sel of checks) {
           if (skipArr.includes(sel)) continue;
@@ -113,10 +121,27 @@ process.on('SIGINT', async () => {
             && getComputedStyle(el).visibility !== 'hidden';
           if (visible) return sel;
         }
+        // Text-based fallback: look for visible elements with Verify/Continue text
+        const textChecks = document.querySelectorAll('a, button, span, div');
+        for (const el of textChecks) {
+          const txt = el.textContent.trim();
+          if (skipArr.includes(txt)) continue;
+          const low = txt.toLowerCase();
+          if (low !== 'verify' && low !== 'continue') continue;
+          if (el.offsetParent === null) continue;
+          if (getComputedStyle(el).display === 'none') continue;
+          if (getComputedStyle(el).visibility === 'hidden') continue;
+          el.scrollIntoView({ block: 'center' });
+          el.click();
+          return txt;
+        }
         return null;
       }, [...skip]).catch(() => null);
       if (found) return found;
       await ms(1000);
+      } catch (e) {
+        return null;
+      }
     }
     return null;
   };
@@ -134,7 +159,14 @@ process.on('SIGINT', async () => {
   await page.waitForLoadState('networkidle').catch(() => {});
   await ms(2000);
 
+  // Wait for auto-redirect (if it's going to happen)
+  for (let i = 0; i < 15; i++) {
+    if (!page.url().includes('vplink.in')) break;
+    await ms(1000);
+  }
+
   const stuckUrls = new Set();
+  let vplinkStreak = 0;
 
   outer:
   for (let cycle = 0; cycle < 30 && !destinationUrl; cycle++) {
@@ -146,42 +178,66 @@ process.on('SIGINT', async () => {
     }
 
     if (url.includes('vplink.in') && !url.includes('cdn-cgi')) {
-      const hasBtn = await page.evaluate(() => {
-        const el = document.getElementById('get-link');
-        return el && el.offsetParent !== null;
-      }).catch(() => false);
+      vplinkStreak++;
+      if (vplinkStreak >= 3) {
+        console.log('  no auto-redirect — going straight to Get Link...');
+      }
 
-      if (hasBtn) {
-        console.log('  waiting for Get Link countdown...');
+      const doGetLink = async () => {
+        console.log('  waiting for Get Link...');
         try {
-          for (let i = 0; i < 20; i++) {
-            const ready = await page.evaluate(() => {
-              const el = document.getElementById('get-link');
-              return el && !el.classList.contains('disabled');
-            }).catch(() => false);
-            if (ready) break;
-            await ms(1000);
+          const btn = await page.waitForSelector('#get-link, [class*="get-link"], a[href*="get-link"]', { timeout: 35000 }).catch(() => null);
+          if (!btn) {
+            console.log('  #get-link not found on page');
+            return false;
           }
+          await page.waitForFunction(() => {
+            const el = document.getElementById('get-link');
+            return el && !el.classList.contains('disabled');
+          }, { timeout: 30000 }).catch(() => {});
+          await ms(1000);
           console.log('  clicking Get Link...');
+          const navPromise = page.waitForNavigation({ timeout: 15000 }).catch(() => null);
           const newTabPromise = context.waitForEvent('page', { timeout: 15000 }).catch(() => null);
-          await clickSel('#get-link');
+          await page.click('#get-link', { timeout: 5000 }).catch(() => clickSel('#get-link'));
+          let navigated = false;
+          if (await navPromise) {
+            console.log('  page navigated after Get Link');
+            navigated = true;
+          }
           const newTab = await newTabPromise;
           if (newTab) {
             console.log('  new tab opened, waiting for destination URL...');
             try {
-              await newTab.waitForLoadState('domcontentloaded', { timeout: 15000 });
-              await ms(3000);
+              await newTab.waitForLoadState('domcontentloaded', { timeout: 20000 });
+              await ms(5000);
               const tabUrl = newTab.url();
               console.log(`  new tab URL: ${tabUrl.substring(0, 100)}`);
               if (tabUrl && !tabUrl.includes('about:blank') && !tabUrl.includes('chrome-error') && !tabUrl.includes('vplink')) {
                 destinationUrl = tabUrl;
+              } else {
+                console.log('  new tab is intermediate, watching for real navigation...');
+                try {
+                  await newTab.waitForNavigation({ timeout: 10000 });
+                  await ms(3000);
+                  const realUrl = newTab.url();
+                  if (realUrl && !realUrl.includes('about:blank') && !realUrl.includes('chrome-error') && !realUrl.includes('vplink')) {
+                    destinationUrl = realUrl;
+                  }
+                } catch {}
               }
             } catch (e) {
               console.log(`  new tab error: ${e.message.substring(0, 50)}`);
             }
             await newTab.close().catch(() => {});
-          } else {
-            console.log('  no new tab, checking current page...');
+            navigated = true;
+          }
+          if (navigated && !destinationUrl) {
+            await ms(5000);
+            const finalUrl = page.url();
+            if (finalUrl && !isIntermediate(finalUrl)) {
+              destinationUrl = finalUrl;
+            }
           }
         } catch (e) {
           console.log(`  Get Link interrupted: ${e.message.substring(0, 50)}`);
@@ -191,13 +247,39 @@ process.on('SIGINT', async () => {
           const cur = page.url();
           for (let i = 0; i < 25; i++) {
             try {
-              if (page.url() !== cur && !page.url().includes('vplink')) {
-                destinationUrl = page.url(); break;
+              const u = page.url();
+              if (u !== cur && !isIntermediate(u)) {
+                destinationUrl = u; break;
               }
-            } catch {}
-            await ms(1000);
+            } catch { break; }
+            if (!(await ms(1000))) break;
           }
-          try { if (!destinationUrl) destinationUrl = page.url(); } catch {}
+          try {
+            const u = page.url();
+            if (!isIntermediate(u)) destinationUrl = u;
+          } catch {}
+        }
+        return !!destinationUrl;
+      };
+
+      if (vplinkStreak >= 3) {
+        if (await doGetLink()) break;
+        console.log('  Get Link failed — reloading for retry...');
+        await page.goto(`https://vplink.in/${KEY}`, { waitUntil: 'domcontentloaded', timeout: navTimeout }).catch(() => {});
+        await page.waitForLoadState('networkidle').catch(() => {});
+        await ms(2000);
+        vplinkStreak = 0;
+        continue;
+      }
+
+      const hasBtn = await page.evaluate(() => {
+        const el = document.getElementById('get-link');
+        return el && el.offsetParent !== null;
+      }).catch(() => false);
+
+      if (hasBtn) {
+        if (!(await doGetLink())) {
+          console.log('  Get Link failed');
         }
         break;
       }
@@ -257,6 +339,9 @@ process.on('SIGINT', async () => {
           await clickSel('#main > div:nth-child(4) > center > center > a');
           console.log('  clicked anchor');
           await ms(5000);
+        } else if (btn === 'Verify' || btn === 'Continue') {
+          console.log(`  clicked text ${btn}`);
+          await ms(5000);
         } else {
           await clickSel(btn);
           console.log(`  clicked ${label}`);
@@ -269,6 +354,9 @@ process.on('SIGINT', async () => {
       }
       if (page.url() === startUrl) {
         stuckUrls.add(startUrl);
+        console.log('  stuck — force-navigating to vplink.in...');
+        await page.goto(`https://vplink.in/${KEY}`, { waitUntil: 'domcontentloaded', timeout: navTimeout }).catch(() => {});
+        await page.waitForLoadState('networkidle').catch(() => {});
       }
       continue;
     }
@@ -280,7 +368,35 @@ process.on('SIGINT', async () => {
     }
   }
 
-  if (!destinationUrl) destinationUrl = page.url();
+  if (!destinationUrl) {
+    // Final attempt: wait for Get Link one more time
+    if (page.url().includes('vplink.in')) {
+      try {
+        await page.waitForSelector('#get-link:not(.disabled)', { timeout: 30000 });
+        await ms(1000);
+        const navFinal = page.waitForNavigation({ timeout: 15000 }).catch(() => null);
+        const tabFinal = context.waitForEvent('page', { timeout: 15000 }).catch(() => null);
+        await page.click('#get-link', { timeout: 5000 }).catch(() => clickSel('#get-link'));
+        const finalTab = await tabFinal;
+        if (finalTab) {
+          await finalTab.waitForLoadState('domcontentloaded', { timeout: 20000 });
+          await ms(5000);
+          const tu = finalTab.url();
+          if (tu && !isIntermediate(tu)) destinationUrl = tu;
+          await finalTab.close().catch(() => {});
+        }
+        if (!destinationUrl) {
+          if (await navFinal) await ms(5000);
+          const pu = page.url();
+          if (!isIntermediate(pu)) destinationUrl = pu;
+        }
+      } catch {}
+    }
+    if (!destinationUrl) {
+      const u = page.url();
+      if (u && !isIntermediate(u)) destinationUrl = u;
+    }
+  }
   console.log('\n═════════════════════════════════════════');
   console.log('  ✅ DESTINATION URL:');
   console.log('  ' + destinationUrl);

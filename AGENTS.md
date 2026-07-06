@@ -17,6 +17,10 @@
 | 2026-07-05 | **Proxy test fix**: multi-target fallback (httpbin.org + example.com) — proxies that block httpbin.org no longer fail the test. CONNECT response handler for non-200 status codes prevents hanging. Tested with residential proxy that blocks httpbin.org but works for vplink.in (197.248.239.226:18080). Working proxy pool increased from 26 → 108. | AI |
 | 2026-07-05 | **Auto-delete dead proxies**: `filterAndClean` now deletes failed proxies from DB by default. Deletion batch size increased from 25→50. | AI |
 | 2026-07-05 | **Installer fix**: fixed step numbering (1/6–6/6), added `$SUDO` to symlink command for non-root users, node install now uses system package manager for all distros (apt/yum/dnf/pacman/zypper/apk) instead of assuming nodesource+apt | AI |
+| 2026-07-05 | **Get Link click fix**: use Playwright `page.click()` (real mouse events) instead of JS `el.click()` for Get Link button; wait for both navigation and new tab simultaneously; 5s settle delay before URL capture; final-attempt Get Link block after outer loop exhausted | AI |
+| 2026-07-05 | **Article handler fix**: added 7+ selector patterns for red Verify button (`[class*="verify"]`, `[id*="verify"]`, `[style*="red"]`); text-based element search for "Verify"/"Continue" inside `waitForArticleButton`; force-navigate back to vplink.in when stuck on dead-end article instead of burning through cycles | AI |
+| 2026-07-05 | **Stuck page auto-reload**: if vplink.in auto-redirect fails for 3+ consecutive cycles, skip redirect wait and go straight to Get Link with `waitForSelector`; if Get Link element missing, reload page and retry; final fallback skips intermediate URLs (no more vplink.in output as destination) | AI |
+| 2026-07-05 | **Crash resilience**: made `ms()` function safe (swallows page-closed errors); wrapped `waitForArticleButton` + fallback polling in try/catch; prevented unhandled rejections from killing the script mid-cycle | AI |
 
 ## Overview
 Automated vplink.in URL funnel: navigate auto-redirects, countdown timers, "Continue" buttons on onlinewish/krishitalk articles, click "Get Link" on vplink.in, and capture the final destination URL.
@@ -73,7 +77,8 @@ Automated vplink.in URL funnel: navigate auto-redirects, countdown timers, "Cont
 
 ### Button priority on article pages
 ```
-#tp-snp2  →  #cross-snp2  →  #btn6 (+ 3s wait → #btn7 > button)  →  anchor  →  text "Continue"
+#tp-snp2  →  #cross-snp2  →  #btn6 (+ 3s wait → #btn7 > button)  →  anchor
+→ [class*="verify"] / [id*="verify"] / [style*="red"]  →  text "Verify"  →  text "Continue"
 ```
 
 ## Key Decisions
@@ -183,17 +188,8 @@ node profile-generator.js mobile=true youtube=true
 - proxy-rotator.js full filter tests every proxy sequentially — slow with 500+ proxies; could parallelize
 - No proxy test cache — each view run re-tests all proxies
 
-## Pending Fix Plan — Article Handler Rewrite
-**Status**: ✅ Implemented and tested (2026-07-05)
-
-### Changes needed:
-1. **`waitForArticleButton`** — accept `skip` param (Set of selectors to exclude), add continuous scroll-down every 3s while polling for lazy-loaded content
-2. **Article handler (lines 176-208)** — wrap in inner `while(page.url() === startUrl)` loop that tracks tried buttons in a `Set`. After a click + 5s wait, if URL unchanged → add button to `tried` set and try next priority. If URL changed → exit inner loop.
-3. **Scroll for lazy content** — `window.scrollBy(0, 500)` every ~3s inside `waitForArticleButton` to trigger DOM rendering of buttons far down the page
-
-### Article types handled:
-- **Simple** (`#tp-snp2` navigates): works as before
-- **Verify+Continue** (`#btn6`→`#btn7`): works as before
-- **Stuck `#tp-snp2`** (doesn't navigate): infinite loop → fixed by skipping to next priority
-- **Lazy-loaded** (buttons not yet in DOM): → found via continuous scroll
-- **Multi-step** (multiple clicks needed on same page before navigation): → inner while loop tries all until URL changes
+## Pending Fix Plan
+- **Article selectors are fragile** — `#main > div:nth-child(4) > center > center > a` depends on krishitalk.com DOM structure
+- **No `--key` / `--views` / `--vnc` flags for scripting** (all interactive)
+- **proxy-rotator.js full filter tests every proxy sequentially** — slow with 500+ proxies; could parallelize
+- **No proxy test cache** — each view run re-tests all proxies
