@@ -59,7 +59,7 @@ function saveProxyHistory(history) {
 
 function isConfigured() {
   const cfg = load();
-  return !!(cfg.supabase_url && cfg.supabase_key);
+  return !!(cfg.supabase_url && cfg.supabase_key && cfg.supabase_secret);
 }
 
 // CLI mode: node config.js --get <key> or --set <key> <value>

@@ -24,6 +24,7 @@
 | 2026-07-06 | **Get Link fix**: removed `waitForNavigation` race by using pure URL polling (40s); keep capecutapk new tab open for cookies | AI |
 | 2026-07-06 | **Article verification rewrite**: replaced 18s fixed wait with `showArticleButtons()` re-inject every loop iteration; removed old `verifyViaIframe` 18s delay; iframe focus + injection now continuous while buttons aren't found | AI |
 | 2026-07-06 | **Critical fix: Get Link click must be `page.click()` not JS click** — `#get-link` has `href` pointing to real destination (e.g. apkmirror.com download). Vplink.in's global `click` handler runs `window.open(link.href, '_blank')` — this only works with trusted events (real mouse click). JS `el.click()` produces `isTrusted=false` → popup blocked → no new tab → destination lost. `clickEl` tries `page.click()` (trusted) first, then JS fallback. | AI |
+| 2026-07-06 | **Full audit & fix session**: fixed 70+ issues across all files — clickText trusted events, retry goto crash, Xvfb display conflict, npm install detection, Alpine grep compat, zero-latency filter, config permissions, secret input masking, dead code removal, DEST_PATTERNS cleanup, multi-URL validation, timeout feedback, docs sync | AI |
 
 ## Overview
 Automated vplink.in URL funnel: navigate auto-redirects, countdown timers, "Continue" buttons on onlinewish/krishitalk articles, click "Get Link" on vplink.in, and capture the final destination URL.
@@ -83,14 +84,15 @@ Automated vplink.in URL funnel: navigate auto-redirects, countdown timers, "Cont
 
 ### Button priority on article pages
 ```
-#tp-snp2  →  #cross-snp2  →  #btn6 (+ 3s wait → #btn7 > button)  →  anchor
-→ [class*="verify"] / [id*="verify"] / [style*="red"]  →  text "Verify"  →  text "Continue"
+#tp-snp2  →  #cross-snp2  →  #btn6 (+ 5s wait → #btn7 > button)  →  #btn7
+→ #main > div:nth-child(4) > center > center > a
+→ text "Verify" / "Continue" (via Playwright locator text=, trusted click)
 ```
 
 ## Key Decisions
 - **No hardcoded ad-domain handling** — ads are random and transient; the loop waits and re-checks URL
 - **`#tp-snp2` priority over anchor** — anchor click caused `chrome-error://` page on health-insurance article
-- **Close `about:blank` new tab** from `#get-link` click (`javascript: void(0)`) — then poll current page for real navigation
+- **Keep `#get-link` new tab open** — its `href` is the real destination; poll both page and tab URLs for up to 40s. Don't discard tab when temporarily `about:blank`.
 - **`generated_automation.js` deleted** — replaced by `automation.js`
 - **Screenshots gitignored** via `screenshots/` rule (PNGs excluded from commits)
 - **Proxy rotation via Supabase** — queries `proxy_results` table, tests connectivity, auto-deletes dead IPs, stores 24h history
@@ -191,11 +193,5 @@ node profile-generator.js mobile=true youtube=true
 ## Known Issues / Future Work
 - Article selectors are fragile — `#main > div:nth-child(4) > center > center > a` depends on krishitalk.com DOM structure
 - No `--key` / `--views` / `--vnc` flags for scripting (all interactive)
-- proxy-rotator.js full filter tests every proxy sequentially — slow with 500+ proxies; could parallelize
 - No proxy test cache — each view run re-tests all proxies
-
-## Pending Fix Plan
-- **Article selectors are fragile** — `#main > div:nth-child(4) > center > center > a` depends on krishitalk.com DOM structure
-- **No `--key` / `--views` / `--vnc` flags for scripting** (all interactive)
-- **proxy-rotator.js full filter tests every proxy sequentially** — slow with 500+ proxies; could parallelize
-- **No proxy test cache** — each view run re-tests all proxies
+- Mobile user agents in profile-generator.js are stale (Chrome 125, Feb 2024 build dates)

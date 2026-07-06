@@ -22,7 +22,7 @@ vplink3.0
 2. Installs Node.js 20+ if missing
 3. Clones the repo to `~/vplink3.0`
 4. Installs npm packages & Playwright Chromium browser
-5. Copies the `vplink3.0` command to `/usr/local/bin` (or `$PREFIX/bin` on Termux)
+5. Symlinks the `vplink3.0` command to `/usr/local/bin` (or `$PREFIX/bin` on Termux)
 
 ## Usage
 
@@ -44,7 +44,7 @@ git clone https://github.com/adittaya/VPLINK-3.0 ~/vplink3.0
 cd ~/vplink3.0
 npm install
 npx playwright install chromium
-sudo cp vplink3.0.sh /usr/local/bin/vplink3.0
+sudo ln -sf "$(pwd)/vplink3.0.sh" /usr/local/bin/vplink3.0
 sudo chmod +x /usr/local/bin/vplink3.0
 vplink3.0
 ```

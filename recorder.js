@@ -3,7 +3,8 @@ const fs = require('fs');
 const path = require('path');
 
 const RECORDING_DIR = process.argv[2];
-const KEY = process.argv[3] || 'UbpV2D';
+const KEY = process.argv[3];
+if (!KEY) { console.error('Usage: node recorder.js <recording_dir> <vplink_key>'); process.exit(1); }
 const SCREENSHOTS_DIR = path.join(RECORDING_DIR, 'screenshots');
 const SNAPSHOTS_DIR = path.join(RECORDING_DIR, 'snapshots');
 

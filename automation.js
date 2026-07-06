@@ -5,6 +5,7 @@ try {
   ({ chromium } = require('playwright-core'));
 }
 const fs = require('fs');
+const path = require('path');
 
 let browser;
 process.on('SIGINT', async () => {
@@ -66,25 +67,31 @@ process.on('SIGINT', async () => {
 
   const clickText = async txt => {
     try {
-      return await page.evaluate(t => {
-        const walker = document.createTreeWalker(document.body, 4, null, false);
-        let n; while (n = walker.nextNode()) {
-          if (n.textContent.trim().toLowerCase() === t.toLowerCase()) {
-            n.parentElement?.scrollIntoView({ block: 'center' });
-            n.parentElement?.click();
-            return true;
+      await page.locator(`text=${txt}`).first().click({ timeout: 5000 });
+      return true;
+    } catch {
+      try {
+        return await page.evaluate(t => {
+          const walker = document.createTreeWalker(document.body, 4, null, false);
+          let n; while (n = walker.nextNode()) {
+            if (n.textContent.trim().toLowerCase() === t.toLowerCase()) {
+              n.parentElement?.scrollIntoView({ block: 'center' });
+              n.parentElement?.click();
+              return true;
+            }
           }
-        }
-        return false;
-      }, txt);
-    } catch { return false; }
+          return false;
+        }, txt);
+      } catch { return false; }
+    }
   };
 
-  const DEST_PATTERNS = ['wistfulseverely.com/api/', 'token=', '12indiaplay.com', 'vv53243', 'casino', 'one-'];
+  const DEST_PATTERNS = ['wistfulseverely.com/api/', '12indiaplay.com', 'vv53243', 'casino', 'one-'];
+  // Note: 'token=' not included — redundant with wistfulseverely.com/api/ and causes false positives
 
   const isDestination = url => {
-    if (!url.startsWith('http') || url.includes('chrome-error') || url.includes('about:blank'))
-      return false;
+    if (!url || !url.startsWith('http')) return false;
+    if (url.includes('chrome-error') || url.includes('about:blank')) return false;
     for (const p of DEST_PATTERNS) {
       if (url.includes(p)) return true;
     }
@@ -113,21 +120,6 @@ process.on('SIGINT', async () => {
     return await safeEval(() => {
       return !!(document.getElementById('get-link') || document.getElementById('gt-link'));
     });
-  };
-
-  const waitForStableURL = async (timeoutSec = 20) => {
-    let last = safeURL();
-    for (let i = 0; i < timeoutSec; i++) {
-      await ms(1000);
-      const cur = safeURL();
-      if (!cur || cur === last) {
-        if (cur && isDestination(cur)) return cur;
-        return null;
-      }
-      if (isDestination(cur)) return cur;
-      last = cur;
-    }
-    return null;
   };
 
   // ── Inject cookies & force-show buttons (called each loop iteration) ──
@@ -239,9 +231,8 @@ process.on('SIGINT', async () => {
           try {
             const nu = newTab.url();
             if (isDestination(nu)) { destinationUrl = nu; return true; }
-            if (nu.includes('chrome-error') || nu.includes('about:blank')) {
-              newTab = null;
-            }
+            // Don't discard on about:blank — tab may still be loading
+            if (nu.includes('chrome-error')) newTab = null;
           } catch {
             newTab = null;
           }
@@ -274,10 +265,6 @@ process.on('SIGINT', async () => {
       await clickEl(btn);
       console.log('  clicked Continue');
       await ms(5000);
-    } else if (btn === 'anchor') {
-      await clickEl('#main > div:nth-child(4) > center > center > a');
-      console.log('  clicked anchor');
-      await ms(5000);
     } else if (btn === 'verify' || btn === 'continue') {
       await clickText(btn);
       console.log(`  clicked text ${btn}`);
@@ -297,7 +284,11 @@ process.on('SIGINT', async () => {
   } catch {
     console.log('  retrying navigation...');
     await ms(2000);
-    await page.goto(`https://vplink.in/${KEY}`, { waitUntil: 'domcontentloaded', timeout: navTimeout });
+    try {
+      await page.goto(`https://vplink.in/${KEY}`, { waitUntil: 'domcontentloaded', timeout: navTimeout });
+    } catch (e) {
+      console.error('  navigation failed after retry:', e.message);
+    }
   }
   await page.waitForLoadState('networkidle').catch(() => {});
   await ms(2000);
@@ -372,12 +363,11 @@ process.on('SIGINT', async () => {
       const startUrl = safeURL();
       triedButtons.clear();
 
-      // Initial: focus iframe to trigger verification monitor, then show buttons
+      // Initial: focus iframe to trigger verification monitor
       await safeEval(() => {
         const iframe = document.querySelector('iframe[src*="google_ads"], iframe[id*="google_ads"], iframe');
         if (iframe) iframe.focus();
       });
-      await showArticleButtons();
 
       while (safeURL() === startUrl) {
         // Re-inject every loop iteration — page JS may revert display changes
@@ -425,7 +415,7 @@ process.on('SIGINT', async () => {
   console.log('\n═════════════════════════════════════════');
   console.log('  ✅ DESTINATION URL:');
   console.log('  ' + (destinationUrl || 'N/A'));
-  if (destinationUrl) fs.writeFileSync('destination_url.txt', destinationUrl);
+  if (destinationUrl) fs.writeFileSync(path.join(__dirname, 'destination_url.txt'), destinationUrl);
   await ms(2000);
   await browser.close();
 })();

@@ -174,7 +174,8 @@ async function filterAndClean(tier = 'premium', concurrency = 50, deleteDead = f
     console.error(`  [Proxy] Deleting ${results.dead.length} dead proxies...`);
     for (let i = 0; i < results.dead.length; i += 50) {
       const batch = results.dead.slice(i, i + 50);
-      await Promise.allSettled(batch.map(p => deleteProxy(p.ip, p.port)));
+      // Parallel batch delete — can increase concurrency for faster cleanup
+    await Promise.allSettled(batch.map(p => deleteProxy(p.ip, p.port)));
     }
     console.error(`  [Proxy] Deleted ${results.dead.length} dead proxies`);
   }
@@ -218,7 +219,7 @@ async function getProxy(tier = 'premium') {
   }
 
   // Filter out low-quality proxies — require latency < 5s
-  const usable = proxies.filter(p => p.latency_ms && p.latency_ms < 5000);
+  const usable = proxies.filter(p => p.latency_ms !== undefined && p.latency_ms !== null && p.latency_ms < 5000);
   if (usable.length === 0) {
     console.error(`  [Proxy] All ${proxies.length} proxies are too slow, taking the fastest anyway`);
   }
@@ -269,7 +270,7 @@ async function getProxyQuick(tier = 'premium') {
 if (require.main === module) {
   const tier = process.argv[2] || 'premium';
   const purge = process.argv.includes('--purge');
-  const quick = process.argv.includes('--quick') || process.argv.includes('--purge');
+  const quick = process.argv.includes('--quick');
 
   if (purge) {
     // Full test + delete dead proxies

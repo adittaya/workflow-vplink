@@ -45,8 +45,8 @@ cleanup_pids() {
     kill "$pid" 2>/dev/null || true
   done
   PIDS=()
-  # Remove stale lock files
-  rm -f /tmp/.X99-lock /tmp/.X11-unix/X99 2>/dev/null
+  # Remove stale lock files (per-display)
+  [ -n "$DISPLAY" ] && rm -f "/tmp/.X${DISPLAY#:}-lock" "/tmp/.X11-unix/X${DISPLAY#:}" 2>/dev/null
 }
 
 trap 'echo ""; echo "Interrupted."; cleanup_pids; exit 130' SIGINT SIGTERM
@@ -54,7 +54,7 @@ trap 'echo ""; echo "Interrupted."; cleanup_pids; exit 130' SIGINT SIGTERM
 # ── VNC detection ──────────────────────────────────────
 detect_vnc() {
   local ports
-  ports=$(ss -tlnp 2>/dev/null | grep -oP '(?<=:)\d+' | grep '^59[0-9][0-9]$' | sort -u || true)
+  ports=$(ss -tlnp 2>/dev/null | grep -oE ':[0-9]+ ' | grep -oE '[0-9]+' | grep '^59[0-9][0-9]$' | sort -u || true)
   if [ -z "$ports" ]; then
     echo ""
     return 1
@@ -217,7 +217,7 @@ echo ""
 #  RUN LOOP
 # ════════════════════════════════════════════════════════
 
-export NODE_PATH="$SCRIPT_DIR/node_modules"
+export NODE_PATH="${NODE_PATH:-}:$SCRIPT_DIR/node_modules"
 export VPLINK_TERMUX="$TERMUX"
 
 for (( i=1; i<=VIEWS; i++ )); do
@@ -232,10 +232,20 @@ for (( i=1; i<=VIEWS; i++ )); do
   CURRENT_KEY="$KEY"
   if [ -n "$MULTI_URLS" ]; then
     IFS=',' read -ra URL_ARR <<< "$MULTI_URLS"
-    RAND_IDX=$(( RANDOM % ${#URL_ARR[@]} ))
-    RAW="${URL_ARR[$RAND_IDX]}"
-    CURRENT_KEY=$(echo "$RAW" | sed 's|https\?://vplink.in/||' | xargs)
-    info "Picked key ${RAND_IDX}: ${CURRENT_KEY}"
+    # Filter out empty entries
+    VALID_KEYS=()
+    for raw in "${URL_ARR[@]}"; do
+      k=$(echo "$raw" | sed 's|https\?://vplink.in/||' | xargs)
+      [ -n "$k" ] && VALID_KEYS+=("$k")
+    done
+    if [ ${#VALID_KEYS[@]} -eq 0 ]; then
+      warn "No valid keys in multi-URL list, using primary key"
+      CURRENT_KEY="$KEY"
+    else
+      RAND_IDX=$(( RANDOM % ${#VALID_KEYS[@]} ))
+      CURRENT_KEY="${VALID_KEYS[$RAND_IDX]}"
+      info "Picked key ${RAND_IDX}: ${CURRENT_KEY}"
+    fi
   fi
 
   # ── Proxy ──────────────────────────────────────────
@@ -281,33 +291,37 @@ for (( i=1; i<=VIEWS; i++ )); do
 
   # ── Xvfb + VNC ─────────────────────────────────────
   if [ "$TERMUX" = 0 ]; then
-    Xvfb :99 -screen 0 1280x720x24 &>/dev/null &
+    # Use dynamic display number to avoid conflicts (PID-based)
+    VPLINK_DISPLAY=":$(( 99 + ($$ % 10) ))"
+    Xvfb "$VPLINK_DISPLAY" -screen 0 1280x720x24 &>/dev/null &
     track_pid $!
     sleep 2
 
     if ! pgrep -x Xvfb > /dev/null; then
       warn "Xvfb failed, retrying..."
-      Xvfb :99 -screen 0 1280x720x24 &>/dev/null &
+      Xvfb "$VPLINK_DISPLAY" -screen 0 1280x720x24 &>/dev/null &
       track_pid $!
       sleep 2
     fi
 
     if [[ "$VNC_NEEDED" =~ ^[yY] ]]; then
-      x11vnc -display :99 -forever -shared -rfbport "$VNC_PORT" &>/dev/null &
+      x11vnc -display "$VPLINK_DISPLAY" -forever -shared -rfbport "$VNC_PORT" &>/dev/null &
       track_pid $!
       sleep 1
       ok "VNC on port $VNC_PORT"
     fi
 
-    export DISPLAY=:99
+    export DISPLAY="$VPLINK_DISPLAY"
   fi
 
   # ── Run automation ─────────────────────────────────
   cd "$SCRIPT_DIR"
-  info "Starting automation..."
+  info "Starting automation (timeout: 480s)..."
   timeout 480 $NODE_BIN "$AUTOMATION" "$CURRENT_KEY"
   EXIT_CODE=$?
-  if [ "$EXIT_CODE" -ne 0 ] && [ "$EXIT_CODE" -ne 124 ]; then
+  if [ "$EXIT_CODE" -eq 124 ]; then
+    warn "Automation timed out after 480s"
+  elif [ "$EXIT_CODE" -ne 0 ]; then
     warn "Automation exited with code $EXIT_CODE"
   fi
 

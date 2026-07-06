@@ -50,10 +50,12 @@ install_system_deps() {
   else
     case "$PKG_MANAGER" in
       apt)
-        if grep -qi "ubuntu 24" /etc/os-release 2>/dev/null || grep -qi "ubuntu 25" /etc/os-release 2>/dev/null || grep -qi "debian 13" /etc/os-release 2>/dev/null; then
+        # Use dpkg to detect if libcups2t64 (transitional suffix) is available
+        LIBPOSTFIX=""
+        if dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libcups2 2>/dev/null || echo 0)" ge 2.4 2>/dev/null; then
           LIBPOSTFIX="t64"
-        else
-          LIBPOSTFIX=""
+        elif grep -qi "ubuntu 24" /etc/os-release 2>/dev/null; then
+          LIBPOSTFIX="t64"
         fi
         PLAYWRIGHT_DEPS="libnss3 libnspr4 libatk1.0-0${LIBPOSTFIX} libatk-bridge2.0-0${LIBPOSTFIX} libcups2${LIBPOSTFIX} libdrm2 libdbus-1-3 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2"
         ASOUND="libasound2${LIBPOSTFIX}"
@@ -135,14 +137,14 @@ echo ""
 
 # ── 4. Install npm dependencies & Playwright ────────
 echo "[4/6] Installing Playwright + browsers..."
-if [ "$TERMUX" = 1 ]; then
-  # Termux: use playwright-core + system Chromium
-  npm install playwright-core 2>&1 | tail -2
-  echo "  Termux: using system Chromium at $(which chromium-browser || which chromium)"
-else
-  npm install 2>&1 | tail -2
-  npx playwright install chromium 2>&1 | tail -1
-fi
+  if [ "$TERMUX" = 1 ]; then
+    # Termux: use playwright-core + system Chromium
+    npm install playwright-core || { echo "  ERROR: npm install playwright-core failed"; exit 1; }
+    echo "  Termux: using system Chromium at $(which chromium-browser || which chromium)"
+  else
+    npm install || { echo "  ERROR: npm install failed"; exit 1; }
+    npx playwright install chromium || { echo "  ERROR: playwright chromium install failed"; exit 1; }
+  fi
 echo ""
 
 # ── 5. Install command ─────────────────────────────
@@ -184,7 +186,8 @@ echo ""
 
 read -p "  Supabase URL: " SB_URL
 read -p "  Supabase Anon/Publishable Key: " SB_KEY
-read -p "  Supabase Secret/Service Key: " SB_SECRET
+read -s -p "  Supabase Secret/Service Key: " SB_SECRET
+echo ""
 
 if [ -n "$SB_URL" ] && [ -n "$SB_KEY" ]; then
   cat > "$CONFIG_FILE" <<EOF
@@ -202,6 +205,7 @@ if [ -n "$SB_URL" ] && [ -n "$SB_KEY" ]; then
 }
 EOF
   echo "  Credentials saved to $CONFIG_FILE"
+  chmod 600 "$CONFIG_FILE"
 else
   cat > "$CONFIG_FILE" <<EOF
 {
@@ -217,6 +221,7 @@ else
   "views": 1
 }
 EOF
+  chmod 600 "$CONFIG_FILE"
   echo "  Empty config saved (proxy disabled)."
 fi
 
