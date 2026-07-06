@@ -232,10 +232,25 @@ process.on('SIGINT', async () => {
       const btn = await page.waitForSelector('#get-link', { timeout: 35000 }).catch(() => null);
       if (!btn) return false;
 
-      await page.waitForFunction(() => {
-        const el = document.getElementById('get-link');
-        return el && !el.classList.contains('disabled');
-      }, { timeout: 30000 }).catch(() => {});
+      // Wait for any visible countdown timer elements to finish
+      const timerSelectors = ['#tp-wait1', '#ce-wait1', '#tp-time', '#ce-time',
+        '[class*="timer"]', '[id*="timer"]', '[class*="countdown"]', '[id*="countdown"]'];
+      for (const sel of timerSelectors) {
+        try {
+          await page.waitForSelector(sel, { state: 'hidden', timeout: 1000 }).catch(() => {});
+        } catch {}
+      }
+
+      // Wait for disabled class to be removed (countdown finished)
+      {
+        const t0 = Date.now();
+        await page.waitForFunction(() => {
+          const el = document.getElementById('get-link');
+          return el && !el.classList.contains('disabled');
+        }, { timeout: 30000 });
+        const elapsed = Date.now() - t0;
+        if (elapsed > 500) console.log(`  countdown: ${elapsed}ms`);
+      }
       await ms(500);
 
       console.log('  clicking Get Link');
@@ -366,15 +381,18 @@ process.on('SIGINT', async () => {
     // ── vplink.in ──
     if (isVplink || (url.includes('vplink.in') && !url.includes('cdn-cgi'))) {
       vplinkMisses++;
-      const hasBtn = await safeEval(() => {
+      const btnState = await safeEval(() => {
         const el = document.getElementById('get-link');
-        return el && el.offsetParent !== null;
+        if (!el) return 'missing';
+        if (el.classList.contains('disabled')) return 'disabled';
+        if (el.offsetParent === null) return 'hidden';
+        return 'ready';
       });
-      if (hasBtn || vplinkMisses >= 3) {
-        if (hasBtn) {
-          if (await doGetLink()) break;
-          console.log('  Get Link failed — reloading');
-        }
+
+      // Button ready → click
+      if (btnState === 'ready') {
+        if (await doGetLink()) break;
+        console.log('  Get Link failed — reloading');
         await page.goto(`https://vplink.in/${KEY}`, { waitUntil: 'domcontentloaded', timeout: navTimeout }).catch(() => {});
         await page.waitForLoadState('networkidle').catch(() => {});
         await ms(3000);
@@ -382,6 +400,22 @@ process.on('SIGINT', async () => {
         await ms(2000);
         continue;
       }
+
+      // Button missing for 3+ cycles → key probably consumed, force reload
+      if (btnState === 'missing') {
+        if (vplinkMisses >= 3) {
+          await page.goto(`https://vplink.in/${KEY}`, { waitUntil: 'domcontentloaded', timeout: navTimeout }).catch(() => {});
+          await page.waitForLoadState('networkidle').catch(() => {});
+          await ms(3000);
+          if (await doGetLink()) break;
+          await ms(2000);
+        } else {
+          await ms(2000);
+        }
+        continue;
+      }
+
+      // Button exists but disabled/hidden (countdown still running) → wait
       await ms(2000);
       continue;
     }
