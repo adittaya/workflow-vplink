@@ -18,6 +18,44 @@ ok()    { echo -e "  ${GREEN}✓${NC} ${1}"; }
 warn()  { echo -e "  ${YELLOW}⚠${NC} ${1}"; }
 fail()  { echo -e "  ${RED}✗${NC} ${1}"; }
 
+# ── Deep cleanup ──────────────────────────────────────
+deep_cleanup() {
+  local cleaned=0
+  # Remove per-view destination files
+  for f in "$SCRIPT_DIR"/destination_url_*.txt; do
+    [ -f "$f" ] && rm -f "$f" && cleaned=$((cleaned + 1))
+  done
+  # Remove main destination file
+  [ -f "$SCRIPT_DIR/destination_url.txt" ] && rm -f "$SCRIPT_DIR/destination_url.txt" && cleaned=$((cleaned + 1))
+  # Remove debug screenshots and HTML captures
+  for f in "$SCRIPT_DIR"/debug_*.png "$SCRIPT_DIR"/debug_*.html; do
+    [ -f "$f" ] && rm -f "$f" && cleaned=$((cleaned + 1))
+  done
+  # Remove event and summary files
+  for f in "$SCRIPT_DIR"/events*.json "$SCRIPT_DIR"/summary.json; do
+    [ -f "$f" ] && rm -f "$f" && cleaned=$((cleaned + 1))
+  done
+  # Remove screen recordings
+  for f in "$SCRIPT_DIR"/*.mp4 "$SCRIPT_DIR"/*.webm "$SCRIPT_DIR"/screen_recording* "$SCRIPT_DIR"/recording_*; do
+    [ -f "$f" ] && rm -f "$f" && cleaned=$((cleaned + 1))
+  done
+  # Remove old record artifacts
+  for f in "$SCRIPT_DIR"/record.js "$SCRIPT_DIR"/record.sh; do
+    [ -f "$f" ] && rm -f "$f" && cleaned=$((cleaned + 1))
+  done
+  # Clean screenshots directory
+  [ -d "$SCRIPT_DIR/screenshots" ] && rm -rf "$SCRIPT_DIR/screenshots" && cleaned=$((cleaned + 1))
+  # Remove stale Xvfb lock files
+  rm -f /tmp/.X*-lock /tmp/.X11-unix/X* 2>/dev/null
+  # Remove Chromium crashpad / session tmp dirs
+  rm -rf /tmp/.org.chromium.* /tmp/.com.google.Chrome.* 2>/dev/null
+  # Remove old Playwright browser artifacts in /tmp
+  rm -rf /tmp/playwright-* /tmp/pp* 2>/dev/null
+  if [ "$cleaned" -gt 0 ]; then
+    ok "cleaned up $cleaned old artifacts"
+  fi
+}
+
 # ── Detect Termux ─────────────────────────────────────
 is_termux() {
   [ -n "$PREFIX" ] && [ -d /data/data/com.termux ] 2>/dev/null
@@ -212,6 +250,9 @@ echo ""
 read -p "Proceed? (Y/n): " CONFIRM
 [[ "$CONFIRM" =~ ^[nN] ]] && { echo "Aborted."; exit 0; }
 echo ""
+
+# ── Cleanup old artifacts ──
+deep_cleanup
 
 # ════════════════════════════════════════════════════════
 #  RUN LOOP

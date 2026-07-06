@@ -17,6 +17,39 @@ process.on('SIGINT', async () => {
   const KEY = process.argv[2] || process.env.VPLINK_KEY;
   if (!KEY) { console.error('Usage: node automation.js <vplink_key>'); process.exit(1); }
 
+  // Clean up old artifacts from previous runs
+  const cleanupDirs = ['.'];
+  const cleanupGlobs = [
+    { match: 'destination_url', isDir: false },
+    { match: 'debug_', isDir: false },
+    { match: 'events', isDir: false },
+    { match: 'summary.json', isDir: false },
+    { match: 'screen_recording', isDir: false },
+    { match: 'recording_', isDir: false },
+    { match: 'record.js', isDir: false },
+    { match: 'record.sh', isDir: false },
+  ];
+  for (const dir of cleanupDirs) {
+    const fullDir = path.join(__dirname, dir);
+    try {
+      const entries = fs.readdirSync(fullDir);
+      for (const e of entries) {
+        for (const g of cleanupGlobs) {
+          if (e.startsWith(g.match)) {
+            const fp = path.join(fullDir, e);
+            try {
+              if (g.isDir) fs.rmSync(fp, { recursive: true, force: true });
+              else if (fs.statSync(fp).isFile()) fs.unlinkSync(fp);
+            } catch {}
+            break;
+          }
+        }
+      }
+    } catch {}
+  }
+  // Clean screenshots directory
+  try { fs.rmSync(path.join(__dirname, 'screenshots'), { recursive: true, force: true }); } catch {}
+
   const stealthArgs = ['--no-sandbox', '--disable-gpu', '--disable-blink-features=AutomationControlled',
     '--disable-dev-shm-usage', '--disable-accelerated-2d-canvas', '--disable-setuid-sandbox'];
   const launchOpts = {};
