@@ -69,9 +69,13 @@ process.on('SIGINT', async () => {
     if (res.url().includes('wistfulseverely.com')) {
       console.log(`  [wistfulseverely] response ${res.status()} ${res.url().substring(0, 100)}`);
     }
+    if ((res.url().includes('facebook.com/tr/') || res.url().includes('adscool.net/pageview/')) && res.status() === 200) {
+      wistfulTrackingDone = true;
+    }
   });
 
   let destinationUrl = null;
+  let wistfulTrackingDone = false;
   const ms = async t => { try { await page.waitForTimeout(t); } catch {} };
   const safeURL = () => { try { return page.url(); } catch { return ''; } };
   const safeEval = fn => { try { return page.evaluate(fn).catch(() => null); } catch { return null; } };
@@ -298,8 +302,14 @@ process.on('SIGINT', async () => {
           stableCount++;
           if (stableCount >= 3 && isDestination(currentUrl)) {
             destinationUrl = currentUrl;
-            // Let main page complete its wistfulseverely tracking naturally
-            await ms(5000);
+            // Wait for wistfulseverely tracking chain to complete
+            // (Facebook pixel / adscool call), up to 15s
+            {
+              const t0 = Date.now();
+              while (Date.now() - t0 < 15000 && !wistfulTrackingDone) await ms(500);
+              const elapsed = Date.now() - t0;
+              if (elapsed > 1000) console.log(`  tracking wait: ${elapsed}ms`);
+            }
             return true;
           }
         } else {
