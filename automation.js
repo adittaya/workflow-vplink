@@ -483,7 +483,15 @@ process.on('SIGINT', async () => {
       continue;
     }
 
-    // ── Unknown (ad) — wait for navigation ──
+    // ── Unknown / error — recover or wait ──
+    if (url.startsWith('chrome-error://')) {
+      console.log('  chrome-error — navigating to vplink.in');
+      await page.goto(`https://vplink.in/${KEY}`, { waitUntil: 'domcontentloaded', timeout: navTimeout }).catch(() => {});
+      await page.waitForLoadState('networkidle').catch(() => {});
+      await ms(3000);
+      await waitRedirect();
+      continue;
+    }
     for (let i = 0; i < 8; i++) {
       await ms(1000);
       const u = safeURL();
@@ -492,7 +500,16 @@ process.on('SIGINT', async () => {
   }
 
   if (!destinationUrl) {
-    if (safeURL().includes('vplink.in')) await doGetLink();
+    if (safeURL().includes('vplink.in')) {
+      await doGetLink();
+    } else if (safeURL().startsWith('chrome-error://')) {
+      console.log('  final attempt — force vplink.in from chrome-error');
+      await page.goto(`https://vplink.in/${KEY}`, { waitUntil: 'domcontentloaded', timeout: navTimeout }).catch(() => {});
+      await page.waitForLoadState('networkidle').catch(() => {});
+      await ms(3000);
+      await waitRedirect();
+      if (safeURL().includes('vplink.in')) await doGetLink();
+    }
   }
 
   console.log('\n═════════════════════════════════════════');
