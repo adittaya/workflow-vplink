@@ -248,11 +248,8 @@ process.on('SIGINT', async () => {
           stableCount++;
           if (stableCount >= 3 && isDestination(currentUrl)) {
             destinationUrl = currentUrl;
-            // Navigate main page to destination so conversion pixels can fire
-            try {
-              await page.goto(currentUrl, { waitUntil: 'networkidle', timeout: 30000 }).catch(() => {});
-              await ms(3000);
-            } catch {}
+            // Let main page complete its wistfulseverely tracking naturally
+            await ms(5000);
             return true;
           }
         } else {

@@ -26,6 +26,7 @@
 | 2026-07-06 | **Critical fix: Get Link click must be `page.click()` not JS click** — `#get-link` has `href` pointing to real destination (e.g. apkmirror.com download). Vplink.in's global `click` handler runs `window.open(link.href, '_blank')` — this only works with trusted events (real mouse click). JS `el.click()` produces `isTrusted=false` → popup blocked → no new tab → destination lost. `clickEl` tries `page.click()` (trusted) first, then JS fallback. | AI |
 | 2026-07-06 | **Full audit & fix session**: fixed 70+ issues across all files — clickText trusted events, retry goto crash, Xvfb display conflict, npm install detection, Alpine grep compat, zero-latency filter, config permissions, secret input masking, dead code removal, DEST_PATTERNS cleanup, multi-URL validation, timeout feedback, docs sync | AI |
 | 2026-07-06 | **Dashboard discrepancy fix**: URL stability (3 consecutive same-URL), new tab networkidle wait, removed isDestination catch-all, navigate to destination page after capture for pixel fire, removed end-of-loop catch-all, 15s→30s new tab timeout, ad section no longer captures URLs | AI |
+| 2026-07-06 | **Critical fix: Do NOT navigate main page after capture** — force-navigating to destination URL interrupts wistfulseverely conversion tracking. Let main page complete its natural tracking flow. Wait 5s instead. | AI |
 
 ## Overview
 Automated vplink.in URL funnel: navigate auto-redirects, countdown timers, "Continue" buttons on onlinewish/krishitalk articles, click "Get Link" on vplink.in, and capture the final destination URL.
@@ -67,7 +68,7 @@ Automated vplink.in URL funnel: navigate auto-redirects, countdown timers, "Cont
    - Wait for new tab to reach `networkidle`, then poll BOTH `page.url()` and new tab URL for up to 40s (1s intervals)
    - **URL stability check**: require 3 consecutive same-URL observations before declaring destination (filters intermediate tracking redirects)
    - Current page navigates to wistfulseverely PPC shortlink (returns 403) — ignore this, destination is in the new tab
-5. **Destination detected** → navigate main page to destination URL, wait for `networkidle` + 3s for conversion pixels, then save to `destination_url.txt`
+5. **Destination detected** → wait 5s for wistfulseverely tracking to complete naturally, then save to `destination_url.txt`
 
 ### Env vars consumed by automation.js
 - `VPLINK_KEY` — key fallback (if no CLI arg)
@@ -98,8 +99,8 @@ Automated vplink.in URL funnel: navigate auto-redirects, countdown timers, "Cont
 - **`#tp-snp2` priority over anchor** — anchor click caused `chrome-error://` page on health-insurance article
 - **Keep `#get-link` new tab open** — its `href` is the real destination; poll both page and tab URLs for up to 40s. Don't discard tab when temporarily `about:blank`.
 - **URL stability check** — `doGetLink` requires 3 consecutive same-URL observations before declaring destination. Filters intermediate tracking redirects.
-- **Navigate to destination after capture** — main page loads the destination URL and waits 3s so conversion pixels can fire on the destination site.
-- **No catch-all in `isDestination`** — only explicit URL patterns match. Prevents ad/tracking URLs from being counted as successful views.
+- **Do NOT navigate main page after capture** — force-navigating to destination URL interrupts wistfulseverely conversion tracking. Let main page complete its natural tracking flow.
+- **No end-of-loop catch-all** — only `doGetLink` can declare success; final arbitrary URL check removed.
 - **`generated_automation.js` deleted** — replaced by `automation.js`
 - **Screenshots gitignored** via `screenshots/` rule (PNGs excluded from commits)
 - **Proxy rotation via Supabase** — queries `proxy_results` table, tests connectivity, auto-deletes dead IPs, stores 24h history
