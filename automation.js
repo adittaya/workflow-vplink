@@ -86,8 +86,8 @@ process.on('SIGINT', async () => {
     }
   };
 
-  const DEST_PATTERNS = ['wistfulseverely.com/api/', '12indiaplay.com', 'vv53243', 'casino', 'one-'];
-  // Note: 'token=' not included — redundant with wistfulseverely.com/api/ and causes false positives
+  const DEST_PATTERNS = ['wistfulseverely.com/api/', '12indiaplay.com', 'vv53243', 'casino', 'one-',
+    'apkmirror.com', 'play.google.com', 'download', '.apk'];
 
   const isDestination = url => {
     if (!url || !url.startsWith('http')) return false;
@@ -95,15 +95,7 @@ process.on('SIGINT', async () => {
     for (const p of DEST_PATTERNS) {
       if (url.includes(p)) return true;
     }
-    // Non-article domains that aren't known intermediate
-    const knownInter = ['vplink.in', 'onlinewish', 'krishitalk', 'learn_more', 'studydegree', 'studyblog',
-      'jobskiki', 'educatehub', 'studyeducates'];
-    for (const k of knownInter) {
-      if (url.includes(k)) return false;
-    }
-    // wistfulseverely landing page (not api) is intermediate
-    if (url.includes('wistfulseverely.com') && !url.includes('/api/')) return false;
-    return true;
+    return false;
   };
 
   const isArticlePage = async () => {
@@ -211,31 +203,53 @@ process.on('SIGINT', async () => {
       await ms(500);
 
       console.log('  clicking Get Link');
-      const newTabPromise = context.waitForEvent('page', { timeout: 15000 }).catch(() => null);
+      const newTabPromise = context.waitForEvent('page', { timeout: 30000 }).catch(() => null);
 
       await clickEl('#get-link');
 
-      // Keep new tab open — it contains the real destination URL
       let newTab = await newTabPromise;
 
       console.log('  waiting for destination...');
+      let stableUrl = null;
+      let stableCount = 0;
+
       for (let i = 0; i < 40; i++) {
         await ms(1000);
 
-        // Check main page
-        const u = safeURL();
-        if (isDestination(u)) { destinationUrl = u; return true; }
-
-        // Check new tab if still open
+        // Get current URL — prefer new tab (it contains the real destination)
+        let currentUrl = '';
         if (newTab) {
           try {
-            const nu = newTab.url();
-            if (isDestination(nu)) { destinationUrl = nu; return true; }
-            // Don't discard on about:blank — tab may still be loading
-            if (nu.includes('chrome-error')) newTab = null;
+            // Wait for page to finish loading before reading URL
+            await newTab.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
+            currentUrl = newTab.url();
           } catch {
             newTab = null;
           }
+        }
+        if (!currentUrl || currentUrl.includes('about:blank')) {
+          const u = safeURL();
+          if (u && !u.includes('about:blank')) currentUrl = u;
+        }
+        if (!currentUrl || currentUrl.includes('chrome-error') || currentUrl.includes('about:blank'))
+          continue;
+
+        // Stability: require 3 consecutive same-URL observations
+        // This filters out intermediate tracking redirects
+        if (currentUrl === stableUrl) {
+          stableCount++;
+          if (stableCount >= 3 && isDestination(currentUrl)) {
+            destinationUrl = currentUrl;
+            // Navigate main page to destination so conversion pixels can fire
+            try {
+              await page.goto(currentUrl, { waitUntil: 'networkidle', timeout: 30000 }).catch(() => {});
+              await ms(3000);
+            } catch {}
+            return true;
+          }
+        } else {
+          stableUrl = currentUrl;
+          stableCount = 1;
         }
       }
     } catch {}
@@ -398,18 +412,16 @@ process.on('SIGINT', async () => {
       continue;
     }
 
-    // ── Unknown (ad) — wait ──
+    // ── Unknown (ad) — wait for navigation ──
     for (let i = 0; i < 8; i++) {
       await ms(1000);
       const u = safeURL();
-      if (isDestination(u)) { destinationUrl = u; break; }
       if (u !== url) break;
     }
   }
 
   if (!destinationUrl) {
     if (safeURL().includes('vplink.in')) await doGetLink();
-    if (!destinationUrl) { const u = safeURL(); if (isDestination(u)) destinationUrl = u; }
   }
 
   console.log('\n═════════════════════════════════════════');
