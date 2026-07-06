@@ -21,12 +21,16 @@
 | 2026-07-05 | **Article handler fix**: added 7+ selector patterns for red Verify button (`[class*="verify"]`, `[id*="verify"]`, `[style*="red"]`); text-based element search for "Verify"/"Continue" inside `waitForArticleButton`; force-navigate back to vplink.in when stuck on dead-end article instead of burning through cycles | AI |
 | 2026-07-05 | **Stuck page auto-reload**: if vplink.in auto-redirect fails for 3+ consecutive cycles, skip redirect wait and go straight to Get Link with `waitForSelector`; if Get Link element missing, reload page and retry; final fallback skips intermediate URLs (no more vplink.in output as destination) | AI |
 | 2026-07-05 | **Crash resilience**: made `ms()` function safe (swallows page-closed errors); wrapped `waitForArticleButton` + fallback polling in try/catch; prevented unhandled rejections from killing the script mid-cycle | AI |
+| 2026-07-06 | **Get Link fix**: removed `waitForNavigation` race by using pure URL polling (40s); keep capecutapk new tab open for cookies | AI |
+| 2026-07-06 | **Article verification rewrite**: replaced 18s fixed wait with `showArticleButtons()` re-inject every loop iteration; removed old `verifyViaIframe` 18s delay; iframe focus + injection now continuous while buttons aren't found | AI |
+| 2026-07-06 | **Critical fix: Get Link click must be `page.click()` not JS click** — `#get-link` has `href` pointing to real destination (e.g. apkmirror.com download). Vplink.in's global `click` handler runs `window.open(link.href, '_blank')` — this only works with trusted events (real mouse click). JS `el.click()` produces `isTrusted=false` → popup blocked → no new tab → destination lost. `clickEl` tries `page.click()` (trusted) first, then JS fallback. | AI |
 
 ## Overview
 Automated vplink.in URL funnel: navigate auto-redirects, countdown timers, "Continue" buttons on onlinewish/krishitalk articles, click "Get Link" on vplink.in, and capture the final destination URL.
 
 > ⚠️ **`automation.js` production-ready — do NOT modify its core funnel logic.**
 > All env-var additions (`VPLINK_PROXY`, `VPLINK_USER_AGENT`, `VPLINK_VIEWPORT_WIDTH/HEIGHT`, `VPLINK_EXTRA_ARGS`) are purely additive with `undefined` fallbacks — zero impact on existing behavior. The funnel flow has been verified end-to-end (auto-redirect → article buttons → Get Link → destination capture). If automation fails, the root cause is configuration (proxy connectivity, user-agent, network), NOT the automation logic.
+> **Critical: `clickEl` must use `page.click()` (real mouse event) before JS fallback** — `#get-link` destination only works with trusted click events. JS `el.click()` has `isTrusted=false`, blocking `window.open`.
 
 ## Files
 | File | Purpose |
@@ -45,10 +49,11 @@ Automated vplink.in URL funnel: navigate auto-redirects, countdown timers, "Cont
 1. **Start** → navigate to `https://vplink.in/{KEY}`
 2. **Auto-redirect** → vplink.in JS-redirects to onlinewish or krishitalk article page
 3. **Article page** (onlinewish/krishitalk):
-   - Wait for countdown (`#tp-wait1` / `#tp-generate` elements to disappear), scroll down continuously every 3s for lazy-loaded content
+   - Focus an `<iframe>` to trigger page's verification monitor (sets cookie), then force-show buttons via `showArticleButtons()` (cookie injection + display:block)
    - Enter inner `while(page.url() === startUrl)` loop:
-     - Find the first visible button not yet tried, in priority order: `#tp-snp2` → `#cross-snp2` → `#btn6` (triggers Verify) → wait 3s → `#btn7 > button` (Continue) → `#main > div:nth-child(4) > center > center > a` (anchor fallback)
-     - Click the button, wait 5s
+     - Re-inject buttons (`showArticleButtons()`) every iteration — page JS may revert display changes
+     - Find the first visible button not yet tried, in priority order: `#tp-snp2` → `#cross-snp2` → `#btn6` (triggers Verify) → wait 5s → `#btn7 > button` (Continue) → `#main > div:nth-child(4) > center > center > a` (anchor fallback)
+     - Click the button via Playwright `page.click()`, wait 5s
      - If URL unchanged → add button to `tried` set, try next priority
      - If URL changed → exit inner loop (page navigated)
    - If all buttons exhausted → `clickText('Continue')` fallback
@@ -56,9 +61,9 @@ Automated vplink.in URL funnel: navigate auto-redirects, countdown timers, "Cont
 4. **vplink.in** (back after article cycle):
    - Wait for `#get-link` countdown (~7s, polling every 1s × 20)
    - Click `#get-link`
-   - Capture destination from:
-     a. **New tab** (if `window.open` fires) — reject `about:blank`/`chrome-error`/`vplink` URLs
-     b. **Current page navigation** — poll up to 25s for URL change to non-intermediate URL
+   - **Keep new tab open** — `#get-link`'s `href` is the REAL destination (the `<a>` is prevented from navigating, but `window.open(link.href)` opens it in a new tab)
+   - Poll BOTH `page.url()` and new tab URL for up to 40s (1s intervals) looking for destination
+   - Current page navigates to wistfulseverely PPC shortlink (returns 403) — ignore this, destination is in the new tab
 5. **Destination detected** → save to `destination_url.txt`
 
 ### Env vars consumed by automation.js
@@ -74,6 +79,7 @@ Automated vplink.in URL funnel: navigate auto-redirects, countdown timers, "Cont
 - `wistfulseverely.com/api/users?token=...` (tracking/conversion endpoint)
 - `12indiaplay.com/`
 - `wistful` / `vv53243` / `casino` / `one-` prefixes
+- **`#get-link` href is the REAL destination** — typically a download URL (apkmirror.com, etc.). The new tab opened by `window.open(link.href)` contains the destination. wistfulseverely landing page is a tracking PPC shortlink (returns 403 from JS redirect).
 
 ### Button priority on article pages
 ```
