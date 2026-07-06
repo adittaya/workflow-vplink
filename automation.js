@@ -75,6 +75,13 @@ process.on('SIGINT', async () => {
   const ms = async t => { try { await page.waitForTimeout(t); } catch {} };
   const safeURL = () => { try { return page.url(); } catch { return ''; } };
   const safeEval = fn => { try { return page.evaluate(fn).catch(() => null); } catch { return null; } };
+  // Wait for vplink.in JS auto-redirect to settle (up to 15s)
+  const waitRedirect = async () => {
+    for (let i = 0; i < 15; i++) {
+      if (!safeURL().includes('vplink.in')) break;
+      await ms(1000);
+    }
+  };
 
   const clickEl = async sel => {
     try {
@@ -356,11 +363,7 @@ process.on('SIGINT', async () => {
   await ms(2000);
 
   // Wait for possible auto-redirect
-  for (let i = 0; i < 15; i++) {
-    const u = safeURL();
-    if (!u.includes('vplink.in')) break;
-    await ms(1000);
-  }
+  await waitRedirect();
 
   const stuckUrls = new Set();
   const triedButtons = new Set();
@@ -424,20 +427,20 @@ process.on('SIGINT', async () => {
     if (isArticle || url.includes('onlinewish') || url.includes('krishitalk') || url.includes('learn_more')) {
       if (stuckUrls.has(url)) {
         console.log('  stuck — trying Get Link directly');
-        await page.goto(`https://vplink.in/${KEY}`, { waitUntil: 'domcontentloaded', timeout: navTimeout }).catch(() => {});
-        // Check for Get Link a few times (vplink.in may auto-redirect, but the
-        // key is consumed so Get Link may not appear — one last attempt)
-        for (let i = 0; i < 5; i++) {
-          await ms(1000);
-          if (await doGetLink()) break;
-          if (destinationUrl) break;
-          // If page left vplink.in, go back
+        for (let attempt = 0; attempt < 5 && !destinationUrl; attempt++) {
+          await page.goto(`https://vplink.in/${KEY}`, { waitUntil: 'domcontentloaded', timeout: navTimeout }).catch(() => {});
+          await page.waitForLoadState('networkidle').catch(() => {});
+          await waitRedirect();
           const cur = safeURL();
-          if (!cur.includes('vplink.in') && !isDestination(cur)) {
-            await page.goto(`https://vplink.in/${KEY}`, { waitUntil: 'domcontentloaded', timeout: navTimeout }).catch(() => {});
+          if (cur.includes('vplink.in')) {
+            if (await doGetLink()) break;
+          } else if (isDestination(cur)) {
+            destinationUrl = cur;
+            break;
           }
+          await ms(1000);
         }
-        if (!destinationUrl) break; // key exhausted — give up
+        if (!destinationUrl) break;
         continue;
       }
 
@@ -475,6 +478,7 @@ process.on('SIGINT', async () => {
         console.log('  exhausted — force to vplink.in');
         await page.goto(`https://vplink.in/${KEY}`, { waitUntil: 'domcontentloaded', timeout: navTimeout }).catch(() => {});
         await page.waitForLoadState('networkidle').catch(() => {});
+        await waitRedirect();
       }
       continue;
     }
