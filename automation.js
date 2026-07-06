@@ -17,17 +17,22 @@ process.on('SIGINT', async () => {
   const KEY = process.argv[2] || process.env.VPLINK_KEY;
   if (!KEY) { console.error('Usage: node automation.js <vplink_key>'); process.exit(1); }
 
+  const stealthArgs = ['--no-sandbox', '--disable-gpu', '--disable-blink-features=AutomationControlled',
+    '--disable-dev-shm-usage', '--disable-accelerated-2d-canvas', '--disable-setuid-sandbox'];
   const launchOpts = {};
   if (process.env.VPLINK_TERMUX === '1') {
     launchOpts.headless = true;
     launchOpts.executablePath = process.env.CHROMIUM_PATH || '/data/data/com.termux/files/usr/bin/chromium-browser';
-    launchOpts.args = ['--no-sandbox', '--disable-gpu'];
+    launchOpts.args = [...stealthArgs];
+  } else {
+    launchOpts.headless = false;
+    launchOpts.args = [...stealthArgs];
   }
   if (process.env.VPLINK_PROXY) {
-    launchOpts.args = [...(launchOpts.args || []), `--proxy-server=${process.env.VPLINK_PROXY}`];
+    launchOpts.args.push(`--proxy-server=${process.env.VPLINK_PROXY}`);
   }
   if (process.env.VPLINK_EXTRA_ARGS) {
-    launchOpts.args = [...(launchOpts.args || []), ...process.env.VPLINK_EXTRA_ARGS.split(' ')];
+    launchOpts.args.push(...process.env.VPLINK_EXTRA_ARGS.split(' '));
   }
 
   browser = await chromium.launch(launchOpts);
@@ -39,9 +44,32 @@ process.on('SIGINT', async () => {
       height: parseInt(process.env.VPLINK_VIEWPORT_HEIGHT) || 720,
     };
   }
+  ctxOpts.locale = 'en-US';
   const context = await browser.newContext(ctxOpts);
   const page = await context.newPage();
   page.setDefaultNavigationTimeout(60000);
+
+  // Stealth: spoof common automation detection vectors
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+    Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+    window.chrome = { runtime: {} };
+    const origQuery = window.navigator.permissions.query;
+    window.navigator.permissions.query = p => p.name === 'notifications' ? Promise.resolve({ state: 'denied' }) : origQuery(p);
+  });
+
+  // Log wistfulseverely API calls for conversion tracking diagnostics
+  page.on('request', req => {
+    if (req.url().includes('wistfulseverely.com')) {
+      console.log(`  [wistfulseverely] ${req.method()} ${req.url().substring(0, 100)}`);
+    }
+  });
+  page.on('response', res => {
+    if (res.url().includes('wistfulseverely.com')) {
+      console.log(`  [wistfulseverely] response ${res.status()} ${res.url().substring(0, 100)}`);
+    }
+  });
 
   let destinationUrl = null;
   const ms = async t => { try { await page.waitForTimeout(t); } catch {} };
