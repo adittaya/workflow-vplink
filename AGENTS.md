@@ -51,6 +51,8 @@
 | 2026-07-06 | **Token reuse proper fix**: removed all `doGetLink()` retry calls. `doGetLink()` now runs at most ONCE per session — increased loop from 40→60 iterations for slow proxies. When it fails, the main loop continues without retrying, since the wistfulseverely token is deterministic (same key + same proxy = same token) and a retry with the same token wouldn't register a new dashboard conversion. | AI |
 | 2026-07-07 | **Complete rewrite from recorded flow data**: deleted old automation.js (582 lines), recorded live flow via flow-recorder.js (120 frames, 1300 network events), analyzed full redirect chain and article button selectors, created new automation.js (330 lines) based on real observations. New article selectors: #link1s-wait1, #continueBtn, #ce-generate a, #tp-generate a. Destination detection now prefers main page URL over popup (wistfulseverely redirect chain lands on main page). | AI |
 | 2026-07-07 | **Domain-agnostic article handler**: removed hardcoded `isArticle()` domain whitelist. Any non-vplink, non-destination URL is treated as an article page. Domains change weekly — flow stays the same. `isDestination()` uses a short blocklist (vplink, wistfulseverely, cdn-cgi, doubleclick, google, facebook, adscool); everything else is either article (handleArticle) or destination (stability check). | AI |
+| 2026-07-07 | **Virtual desktop package**: created `vplink-desktop.sh` — standalone Xvfb + x11vnc manager with display auto-detection, `xdpyinfo` validation, VNC password support, and start/stop/status commands. `install.sh` now symlinks `vplink-desktop` command and offers VNC password setup + optional systemd service during install. `vplink3.0.sh` refactored to delegate all Xvfb/VNC lifecycle to `vplink-desktop.sh`. | AI |
+| 2026-07-07 | **Interactive desktop toggle**: `vplink3.0.sh` questionnaire now asks "Use virtual desktop (Xvfb)?" (Y/n). Setting saved to config as `virtual_desktop`. When disabled, runs headless on desktop Linux too — exports `VPLINK_HEADLESS=1` for `automation.js` awareness. Summary shows mode: Virtual desktop / Headless / Termux. | AI |
 
 ## Overview
 Automated vplink.in URL funnel: navigate auto-redirects, article "Continue" buttons (onlinewish/krishitalk/jobskiki/etc.), click "Get Link" on vplink.in, and capture the final destination URL.
@@ -67,7 +69,8 @@ Automated vplink.in URL funnel: navigate auto-redirects, article "Continue" butt
 | `proxy-rotator.js` | **Proxy rotation system** — fetches from Supabase `proxy_results` table, filters dead IPs, 24h no-repeat rotation |
 | `profile-generator.js` | **Profile generator** — random mobile/desktop user-agents, viewports, YouTube referer headers |
 | `vplink3.0.sh` | **Interactive CLI** — full feature questionnaire, PID tracking, VNC detection, result summary |
-| `install.sh` | **Cross-platform installer** — deps, Node.js, Playwright Chromium, command symlink, credential setup |
+| `vplink-desktop.sh` | **Virtual desktop manager** — Xvfb + x11vnc lifecycle, display auto-detection, VNC password |
+| `install.sh` | **Cross-platform installer** — deps, Node.js, Playwright Chromium, command symlink, credential setup, VNC password |
 | `package.json` | Deps: `playwright` + `playwright-core` |
 | `.gitignore` | Excludes node_modules, screenshots, debug files, recording artifacts, config |
 
@@ -157,12 +160,12 @@ Automated vplink.in URL funnel: navigate auto-redirects, article "Continue" butt
 - **automation.js env-var additions are strictly non-breaking** — all new vars have undefined fallbacks, existing behavior unchanged
 
 ## Operating Modes
-- **Desktop Linux**: headed Chromium via Xvfb (`:99`) + x11vnc (`:5900`)
+- **Desktop Linux**: headed Chromium via `vplink-desktop` (Xvfb auto-display + x11vnc)
 - **Termux (Android)**: headless system Chromium, no display server
 - Detection: `process.env.VPLINK_TERMUX === '1'`
 
 ### Chrome launch args by mode
-- **Desktop**: `--no-sandbox`, `--disable-gpu`, `--disable-blink-features=AutomationControlled`, `--disable-dev-shm-usage`, `--disable-accelerated-2d-canvas`, `--disable-setuid-sandbox`; `headless: false`
+- **Desktop**: `--no-sandbox`, `--disable-gpu`, `--disable-blink-features=AutomationControlled`, `--disable-dev-shm-usage`, `--disable-accelerated-2d-canvas`, `--disable-setuid-sandbox`; `headless: false`; `LIBGL_ALWAYS_SOFTWARE=1`
 - **Termux**: same args + `headless: true`, `executablePath: system chromium-browser`
 
 ## CLI Usage
@@ -175,6 +178,13 @@ printf "KEY\n1\nn\nn\nn\nn\n" | bash vplink3.0.sh
 
 # Direct node
 node automation.js <KEY>
+
+# Virtual desktop manager
+vplink-desktop start --vnc            # Xvfb + VNC on auto display
+vplink-desktop start --vnc --port 5901  # Custom VNC port
+vplink-desktop stop                   # Stop virtual desktop
+vplink-desktop status                 # Show display + VNC status
+vplink-desktop password --set         # Set VNC password
 
 # Config CLI
 node config.js             # dump full config
@@ -228,10 +238,10 @@ node profile-generator.js mobile=true youtube=true
 7. If all proxies exhausted in 24h window, recycles oldest
 
 ## PID Tracking
-- Array-based: `PIDS=( )` stores PIDs of spawned Xvfb, x11vnc, node processes
-- `cleanup_pids()` kills only tracked PIDs, not all matching processes
+- Array-based: `PIDS=( )` stores PIDs of spawned node processes
+- `cleanup_pids()` delegates Xvfb/VNC lifecycle to `vplink-desktop.sh stop`
 - Prevents interference with other automations on the same machine
-- Removes stale `/tmp/.X99-lock` on cleanup
+- Removes stale lock files on cleanup
 
 ## VNC Detection
 - Checks `ss -tlnp` for ports matching `59xx` pattern
@@ -254,5 +264,5 @@ node profile-generator.js mobile=true youtube=true
 - Article selectors are fragile — `#main > div:nth-child(4) > center > center > a` depends on krishitalk.com DOM structure
 - No `--key` / `--views` / `--vnc` flags for scripting (all interactive)
 - No proxy test cache — each view run re-tests all proxies
-- Desktop Chrome rendering may still show black screen in Xvfb if GPU drivers missing — add `LIBGL_ALWAYS_SOFTWARE=1` as workaround
+- Desktop Chrome rendering may still show black screen in Xvfb if GPU drivers missing — `LIBGL_ALWAYS_SOFTWARE=1` workaround added
 - Hard timing (15s) is unoptimized — articles without buttons waste 15s + inner loop before falling through; could be faster with early-exit DOM checks

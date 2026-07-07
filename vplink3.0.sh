@@ -83,8 +83,19 @@ cleanup_pids() {
     kill "$pid" 2>/dev/null || true
   done
   PIDS=()
-  # Remove stale lock files (per-display)
-  [ -n "$DISPLAY" ] && rm -f "/tmp/.X${DISPLAY#:}-lock" "/tmp/.X11-unix/X${DISPLAY#:}" 2>/dev/null
+  # Stop virtual desktop via vplink-desktop
+  DESKTOP_CMD="$SCRIPT_DIR/vplink-desktop.sh"
+  [ ! -x "$DESKTOP_CMD" ] && DESKTOP_CMD="vplink-desktop"
+  if command -v "$DESKTOP_CMD" &>/dev/null; then
+    $DESKTOP_CMD stop 2>/dev/null || true
+  else
+    # Fallback: manual cleanup
+    if command -v pgrep &>/dev/null; then
+      pkill -f "x11vnc.*$DISPLAY" 2>/dev/null || true
+      pkill -f "Xvfb.*$DISPLAY" 2>/dev/null || true
+    fi
+    [ -n "$DISPLAY" ] && rm -f "/tmp/.X${DISPLAY#:}-lock" "/tmp/.X11-unix/X${DISPLAY#:}" 2>/dev/null
+  fi
 }
 
 trap 'echo ""; echo "Interrupted."; cleanup_pids; exit 130' SIGINT SIGTERM
@@ -110,6 +121,7 @@ SAVED_TIER=$(cfg_get "proxy_tier" 2>/dev/null)
 SAVED_YT=$(cfg_get "youtube_traffic" 2>/dev/null)
 SAVED_MOBILE=$(cfg_get "mobile_profile" 2>/dev/null)
 SAVED_VNC_PORT=$(cfg_get "vnc_port" 2>/dev/null)
+SAVED_DESKTOP=$(cfg_get "virtual_desktop" 2>/dev/null)
 
 [ -z "$SAVED_VIEWS" ] || [ "$SAVED_VIEWS" = "0" ] && SAVED_VIEWS=1
 
@@ -193,11 +205,26 @@ else
   cfg_set "mobile_profile" false
 fi
 
-# ── 7. VNC ─────────────────────────────────────────────
+# ── 7. Virtual desktop (Xvfb) ──────────────────────────
+DESKTOP_NEEDED="y"
+if [ "$TERMUX" = 0 ]; then
+  [ "$SAVED_DESKTOP" = "false" ] && DESKTOP_DEFAULT="n" || DESKTOP_DEFAULT="y"
+  read -p "Use virtual desktop (Xvfb) for headed Chrome? (Y/n) [${DESKTOP_DEFAULT}]: " DESKTOP_CHOICE
+  DESKTOP_CHOICE="${DESKTOP_CHOICE:-$DESKTOP_DEFAULT}"
+  if [[ "$DESKTOP_CHOICE" =~ ^[nN] ]]; then
+    DESKTOP_NEEDED="n"
+    cfg_set "virtual_desktop" false
+  else
+    DESKTOP_NEEDED="y"
+    cfg_set "virtual_desktop" true
+  fi
+fi
+
+# ── 8. VNC ─────────────────────────────────────────────
 VNC_NEEDED="n"
 VNC_PORT="${SAVED_VNC_PORT:-5900}"
 VNC_DETECTED=""
-if [ "$TERMUX" = 0 ]; then
+if [ "$TERMUX" = 0 ] && [ "$DESKTOP_NEEDED" = "y" ]; then
   if detect_vnc; then
     VNC_DETECTED="yes"
     read -p "Use existing VNC? (Y/n): " USE_VNC
@@ -238,7 +265,13 @@ fi
 echo "║  Proxy:        $([[ "$PROXY_ENABLED" = true ]] && echo "enabled (${PROXY_TIER})" || echo "disabled")"
 echo "║  YouTube src:  $([[ "$YT_ENABLED" = true ]] && echo "enabled" || echo "disabled")"
 echo "║  Mobile prof:  $([[ "$MOBILE_ENABLED" = true ]] && echo "enabled" || echo "disabled")"
-[ "$TERMUX" = 1 ] && echo "║  Mode:          Termux (headless)"
+if [ "$TERMUX" = 1 ]; then
+echo "║  Mode:          Termux (headless)"
+elif [ "$DESKTOP_NEEDED" = "n" ]; then
+echo "║  Mode:          Headless (no Xvfb)"
+else
+echo "║  Mode:          Virtual desktop"
+fi
 if [[ "$VNC_NEEDED" =~ ^[yY] ]]; then
 echo "║  VNC:          :$VNC_PORT"
 else
@@ -328,29 +361,40 @@ for (( i=1; i<=VIEWS; i++ )); do
     unset VPLINK_USER_AGENT VPLINK_VIEWPORT_WIDTH VPLINK_VIEWPORT_HEIGHT
   fi
 
-  # ── Xvfb + VNC ─────────────────────────────────────
-  if [ "$TERMUX" = 0 ]; then
-    # Use dynamic display number to avoid conflicts (PID-based)
-    VPLINK_DISPLAY=":$(( 99 + ($$ % 10) ))"
-    Xvfb "$VPLINK_DISPLAY" -screen 0 1280x720x24 &>/dev/null &
-    track_pid $!
-    sleep 2
-
-    if ! pgrep -x Xvfb > /dev/null; then
-      warn "Xvfb failed, retrying..."
-      Xvfb "$VPLINK_DISPLAY" -screen 0 1280x720x24 &>/dev/null &
-      track_pid $!
-      sleep 2
+  # ── Virtual desktop (Xvfb + VNC via vplink-desktop) ──
+  if [ "$TERMUX" = 1 ] || [ "$DESKTOP_NEEDED" = "n" ]; then
+    unset DISPLAY
+    export VPLINK_HEADLESS=1
+  else
+    DESKTOP_CMD="$SCRIPT_DIR/vplink-desktop.sh"
+    if [ ! -x "$DESKTOP_CMD" ]; then
+      DESKTOP_CMD="vplink-desktop"
     fi
 
+    DESKTOP_ARGS="start"
     if [[ "$VNC_NEEDED" =~ ^[yY] ]]; then
-      x11vnc -display "$VPLINK_DISPLAY" -forever -shared -rfbport "$VNC_PORT" &>/dev/null &
-      track_pid $!
-      sleep 1
-      ok "VNC on port $VNC_PORT"
+      DESKTOP_ARGS="$DESKTOP_ARGS --vnc --port $VNC_PORT"
     fi
 
-    export DISPLAY="$VPLINK_DISPLAY"
+    VPLINK_DISPLAY=$($DESKTOP_CMD $DESKTOP_ARGS 2>&1)
+    EXIT_D=$?
+    if [ "$EXIT_D" -ne 0 ]; then
+      warn "Virtual desktop failed to start, running headless"
+      unset DISPLAY
+      export VPLINK_HEADLESS=1
+    else
+      VPLINK_DISPLAY=$(echo "$VPLINK_DISPLAY" | grep '^:' | tail -1)
+      if [ -n "$VPLINK_DISPLAY" ]; then
+        export DISPLAY="$VPLINK_DISPLAY"
+        unset VPLINK_HEADLESS
+        ok "Virtual desktop on $DISPLAY"
+        [[ "$VNC_NEEDED" =~ ^[yY] ]] && ok "VNC on port $VNC_PORT"
+      else
+        warn "Could not determine display number"
+        unset DISPLAY
+        export VPLINK_HEADLESS=1
+      fi
+    fi
   fi
 
   # ── Run automation ─────────────────────────────────
@@ -379,6 +423,10 @@ done
 
 # ── Final cleanup ─────────────────────────────────────
 cleanup_pids
+# Clean VPLink virtual desktop
+DESKTOP_CMD="$SCRIPT_DIR/vplink-desktop.sh"
+[ ! -x "$DESKTOP_CMD" ] && DESKTOP_CMD="vplink-desktop"
+$DESKTOP_CMD stop 2>/dev/null || true
 
 # ── Summary ────────────────────────────────────────────
 echo "══════════════════════════════════════════════"

@@ -147,19 +147,23 @@ echo "[4/6] Installing Playwright + browsers..."
   fi
 echo ""
 
-# ── 5. Install command ─────────────────────────────
-echo "[5/6] Installing vplink3.0 command..."
+# ── 5. Install commands ───────────────────────────
+echo "[5/7] Installing vplink3.0 commands..."
 if [ "$TERMUX" = 1 ]; then
   ln -sf "$DIR/vplink3.0.sh" "$PREFIX/bin/vplink3.0"
   chmod +x "$PREFIX/bin/vplink3.0"
+  ln -sf "$DIR/vplink-desktop.sh" "$PREFIX/bin/vplink-desktop" 2>/dev/null || true
 else
   $SUDO ln -sf "$DIR/vplink3.0.sh" /usr/local/bin/vplink3.0
   $SUDO chmod +x /usr/local/bin/vplink3.0
+  $SUDO ln -sf "$DIR/vplink-desktop.sh" /usr/local/bin/vplink-desktop
+  $SUDO chmod +x /usr/local/bin/vplink-desktop
 fi
-echo "  Symlinked to $DIR/vplink3.0.sh"
+echo "  vplink3.0 → $(which vplink3.0)"
+echo "  vplink-desktop → $(which vplink-desktop || echo 'not installed (Termux)')"
 
 # ── 6. Credential setup ────────────────────────────
-echo "[6/6] Credential setup..."
+echo "[6/7] Credential setup..."
 CONFIG_DIR="$HOME/.vplink3.0"
 mkdir -p "$CONFIG_DIR"
 CONFIG_FILE="$CONFIG_DIR/config.json"
@@ -173,7 +177,9 @@ if [ -f "$CONFIG_FILE" ] && [ -s "$CONFIG_FILE" ]; then
     echo "╔══════════════════════════════════════════════╗"
     echo "║  Installation complete!                      ║"
     echo "║                                              ║"
-    echo "║  Run: vplink3.0                              ║"
+    echo "║  Commands:                                   ║"
+    echo "║    vplink3.0          — Run automation        ║"
+    echo "║    vplink-desktop     — Virtual desktop mgmt  ║"
     echo "╚══════════════════════════════════════════════╝"
     exit 0
   fi
@@ -225,9 +231,41 @@ EOF
   echo "  Empty config saved (proxy disabled)."
 fi
 
+# ── 7. VNC password (optional) ─────────────────────
+echo "[7/7] Virtual desktop setup..."
+if [ "$TERMUX" = 1 ]; then
+  echo "  Skipping (Termux — no virtual desktop needed)"
+elif command -v x11vnc &>/dev/null; then
+  echo ""
+  echo "  VPLink can run in a virtual desktop (Xvfb + VNC) on your VPS."
+  echo "  This lets Chrome run in headed mode with a viewable display."
+  echo ""
+  read -p "  Set up VNC password for remote desktop access? (y/N): " SET_VNC
+  if [[ "$SET_VNC" =~ ^[yY] ]]; then
+    echo ""
+    "$DIR/vplink-desktop.sh" password --set
+    echo ""
+    ok "VNC password configured"
+    echo ""
+    read -p "  Install persistent virtual desktop service? (y/N): " INSTALL_SVC
+    if [[ "$INSTALL_SVC" =~ ^[yY] ]] && command -v systemctl &>/dev/null; then
+      "$DIR/vplink-desktop.sh" service --install 2>/dev/null || {
+        warn "systemd service install skipped (manual: vplink-desktop service --install)"
+      }
+    fi
+  else
+    echo "  VNC password skipped. Start virtual desktop later with:"
+    echo "    vplink-desktop start --vnc"
+  fi
+else
+  echo "  x11vnc not available. Install manually or run without VNC."
+fi
+
 echo ""
 echo "╔══════════════════════════════════════════════╗"
 echo "║  Installation complete!                      ║"
 echo "║                                              ║"
-echo "║  Run: vplink3.0                              ║"
+echo "║  Commands:                                   ║"
+echo "║    vplink3.0          — Run automation        ║"
+echo "║    vplink-desktop     — Virtual desktop mgmt  ║"
 echo "╚══════════════════════════════════════════════╝"
