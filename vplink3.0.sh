@@ -6,9 +6,24 @@ AUTOMATION="$SCRIPT_DIR/automation.js"
 CONFIG_MODULE="$SCRIPT_DIR/config.js"
 PROXY_ROTATOR="$SCRIPT_DIR/proxy-rotator.js"
 PROFILE_GENERATOR="$SCRIPT_DIR/profile-generator.js"
+INSTALLER="$SCRIPT_DIR/install.sh"
 
 NODE_BIN="node"
 [ -x "$PREFIX/bin/node" ] && NODE_BIN="$PREFIX/bin/node"
+
+# ── Dispatch commands ─────────────────────────────────
+case "${1:-}" in
+  update|self-update)
+    exec bash "$INSTALLER" update
+    ;;
+  uninstall)
+    exec bash "$INSTALLER" uninstall --all
+    ;;
+  config)
+    shift
+    exec node "$CONFIG_MODULE" "$@"
+    ;;
+esac
 
 # ── Color helpers ──────────────────────────────────────
 BOLD='\033[1m'; DIM='\033[2m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; RED='\033[0;31m'; NC='\033[0m'

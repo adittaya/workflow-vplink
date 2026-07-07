@@ -53,6 +53,7 @@
 | 2026-07-07 | **Domain-agnostic article handler**: removed hardcoded `isArticle()` domain whitelist. Any non-vplink, non-destination URL is treated as an article page. Domains change weekly — flow stays the same. `isDestination()` uses a short blocklist (vplink, wistfulseverely, cdn-cgi, doubleclick, google, facebook, adscool); everything else is either article (handleArticle) or destination (stability check). | AI |
 | 2026-07-07 | **Virtual desktop package**: created `vplink-desktop.sh` — standalone Xvfb + x11vnc manager with display auto-detection, `xdpyinfo` validation, VNC password support, and start/stop/status commands. `install.sh` now symlinks `vplink-desktop` command and offers VNC password setup + optional systemd service during install. `vplink3.0.sh` refactored to delegate all Xvfb/VNC lifecycle to `vplink-desktop.sh`. | AI |
 | 2026-07-07 | **Interactive desktop toggle**: `vplink3.0.sh` questionnaire now asks "Use virtual desktop (Xvfb)?" (Y/n). Setting saved to config as `virtual_desktop`. When disabled, runs headless on desktop Linux too — exports `VPLINK_HEADLESS=1` for `automation.js` awareness. Summary shows mode: Virtual desktop / Headless / Termux. | AI |
+| 2026-07-07 | **Production-grade installer**: `install.sh` rewritten as a one-command installer (`curl ... | bash`). Auto-detects 20+ environments (Debian/Ubuntu/Arch/Fedora/Alpine/openSUSE/Termux/proot/Container/CI/WSL), installs all deps (system packages, Node.js via binary/pkg-manager/nvm, npm, Playwright Chromium), configures credentials with first-time permanent save, creates global `vplink3.0` command with PATH setup, supports `vplink3.0 update` and `vplink3.0 uninstall` subcommands, logs everything, and is fully idempotent. Created `.github/workflows/ci.yml` with matrix testing across 8 distros + Docker + WSL + Termux compatibility. | AI |
 
 ## Overview
 Automated vplink.in URL funnel: navigate auto-redirects, article "Continue" buttons (onlinewish/krishitalk/jobskiki/etc.), click "Get Link" on vplink.in, and capture the final destination URL.
@@ -70,7 +71,7 @@ Automated vplink.in URL funnel: navigate auto-redirects, article "Continue" butt
 | `profile-generator.js` | **Profile generator** — random mobile/desktop user-agents, viewports, YouTube referer headers |
 | `vplink3.0.sh` | **Interactive CLI** — full feature questionnaire, PID tracking, VNC detection, result summary |
 | `vplink-desktop.sh` | **Virtual desktop manager** — Xvfb + x11vnc lifecycle, display auto-detection, VNC password |
-| `install.sh` | **Cross-platform installer** — deps, Node.js, Playwright Chromium, command symlink, credential setup, VNC password |
+| `install.sh` | **Production-grade one-command installer** — auto-detects 20+ environments, deps, Node.js, Playwright, credentials, global command, update/uninstall, idempotent |
 | `package.json` | Deps: `playwright` + `playwright-core` |
 | `.gitignore` | Excludes node_modules, screenshots, debug files, recording artifacts, config |
 
@@ -173,6 +174,13 @@ Automated vplink.in URL funnel: navigate auto-redirects, article "Continue" butt
 # Interactive (all features)
 vplink3.0
 
+# One-command install
+curl -fsSL https://raw.githubusercontent.com/adittaya/VPLINK-3.0/main/install.sh | bash
+
+# Update / uninstall
+vplink3.0 update
+vplink3.0 uninstall
+
 # Direct (from repo directory)
 printf "KEY\n1\nn\nn\nn\nn\n" | bash vplink3.0.sh
 
@@ -208,7 +216,8 @@ node profile-generator.js mobile=true youtube=true
 ## Dependencies
 - `playwright` (or `playwright-core` fallback for system Chromium)
 - Chromium browser (bundled via `npx playwright install chromium`, or system on Termux)
-- System: Xvfb, x11vnc, Playwright system libs (installed by `install.sh`)
+- System: curl, git, Xvfb, x11vnc, Playwright system libs (installed by `install.sh`)
+- Node.js >= 18 (auto-installed by `install.sh` if missing)
 - No additional npm packages — Supabase REST API accessed via Node.js built-in `fetch()`
 
 ## Config File (`~/.vplink3.0/config.json`)
