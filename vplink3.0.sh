@@ -9,7 +9,7 @@ PROFILE_GENERATOR="$SCRIPT_DIR/profile-generator.js"
 INSTALLER="$SCRIPT_DIR/install.sh"
 
 NODE_BIN="node"
-[ -x "$PREFIX/bin/node" ] && NODE_BIN="$PREFIX/bin/node"
+[ -n "${PREFIX:-}" ] && [ -x "$PREFIX/bin/node" ] && NODE_BIN="$PREFIX/bin/node"
 
 # ── Dispatch commands ─────────────────────────────────
 case "${1:-}" in
@@ -338,7 +338,7 @@ for (( i=1; i<=VIEWS; i++ )); do
   # ── Proxy ──────────────────────────────────────────
   if [ "$PROXY_ENABLED" = "true" ]; then
     info "Fetching proxy..."
-    cd "$SCRIPT_DIR"
+    cd "$SCRIPT_DIR" || exit 1
     # stdout = ip:port only (all status messages go to stderr → visible to user)
     PROXY_RESULT=$($NODE_BIN "$PROXY_ROTATOR" "$PROXY_TIER")
     if [ -n "$PROXY_RESULT" ]; then
@@ -354,7 +354,7 @@ for (( i=1; i<=VIEWS; i++ )); do
 
   # ── Profile (UA + viewport + YouTube headers) ──────
   if [ "$MOBILE_ENABLED" = "true" ] || [ "$YT_ENABLED" = "true" ]; then
-    cd "$SCRIPT_DIR"
+    cd "$SCRIPT_DIR" || exit 1
     PROFILE_OUTPUT=$($NODE_BIN "$PROFILE_GENERATOR" \
       "mobile=${MOBILE_ENABLED}" "youtube=${YT_ENABLED}")
     if [ -n "$PROFILE_OUTPUT" ]; then
@@ -413,11 +413,11 @@ for (( i=1; i<=VIEWS; i++ )); do
   fi
 
   # ── Run automation ─────────────────────────────────
-  cd "$SCRIPT_DIR"
+  cd "$SCRIPT_DIR" || exit 1
   info "Starting automation (timeout: 480s)..."
   DEBUG_FLAG=""
   [ "${VPLINK_DEBUG:-0}" = "1" ] && DEBUG_FLAG="--vplink-debug"
-  timeout 480 $NODE_BIN "$AUTOMATION" "$CURRENT_KEY" $DEBUG_FLAG
+  timeout 480 "$NODE_BIN" "$AUTOMATION" "$CURRENT_KEY" ${DEBUG_FLAG:+"$DEBUG_FLAG"}
   EXIT_CODE=$?
   if [ "$EXIT_CODE" -eq 124 ]; then
     warn "Automation timed out after 480s"

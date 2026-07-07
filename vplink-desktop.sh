@@ -154,7 +154,7 @@ do_start() {
   local req_password=""
 
   # Parse args
-  while [ $# -gt 0 ]; do
+  while [ "$#" -gt 0 ]; do
     case "$1" in
       --vnc) use_vnc=1 ;;
       --display) req_display="$2"; shift ;;
@@ -232,10 +232,10 @@ do_start() {
   # Start x11vnc
   local vnc_pid=""
   if [ "$use_vnc" -eq 1 ]; then
-    local vnc_args="-display $DISPLAY -forever -shared -rfbport $VNC_PORT"
+    local vnc_args=(-display "$DISPLAY" -forever -shared -rfbport "$VNC_PORT")
     # Use password file if it exists
     if [ -f "$VNC_PASSWD_FILE" ]; then
-      vnc_args="$vnc_args -rfbauth $VNC_PASSWD_FILE"
+      vnc_args+=(-rfbauth "$VNC_PASSWD_FILE")
       ok "VNC auth enabled ($VNC_PASSWD_FILE)"
     else
       warn "No VNC password file — VNC will be UNPROTECTED"
@@ -246,7 +246,7 @@ do_start() {
     pkill -f "x11vnc.*$DISPLAY" 2>/dev/null || true
     sleep 0.5
 
-    x11vnc $vnc_args &
+    x11vnc "${vnc_args[@]}" &
     vnc_pid=$!
     sleep 1
 
@@ -270,7 +270,7 @@ do_start() {
 do_stop() {
   local req_display=""
 
-  while [ $# -gt 0 ]; do
+  while [ "$#" -gt 0 ]; do
     case "$1" in
       --display) req_display="$2"; shift ;;
       *) warn "Unknown option: $1" ;;
@@ -415,7 +415,7 @@ do_password() {
   local set_mode=0
   local passwd_file="$VNC_PASSWD_FILE"
 
-  while [ $# -gt 0 ]; do
+  while [ "$#" -gt 0 ]; do
     case "$1" in
       --set) set_mode=1 ;;
       --file) passwd_file="$2"; shift ;;
