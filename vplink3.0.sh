@@ -26,7 +26,7 @@ case "${1:-}" in
 esac
 
 # ── Color helpers ──────────────────────────────────────
-BOLD='\033[1m'; DIM='\033[2m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; RED='\033[0;31m'; NC='\033[0m'
+GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; RED='\033[0;31m'; NC='\033[0m'
 
 info()  { echo -e "  ${CYAN}${1}${NC}"; }
 ok()    { echo -e "  ${GREEN}✓${NC} ${1}"; }
@@ -238,10 +238,8 @@ fi
 # ── 8. VNC ─────────────────────────────────────────────
 VNC_NEEDED="n"
 VNC_PORT="${SAVED_VNC_PORT:-5900}"
-VNC_DETECTED=""
 if [ "$TERMUX" = 0 ] && [ "$DESKTOP_NEEDED" = "y" ]; then
   if detect_vnc; then
-    VNC_DETECTED="yes"
     read -p "Use existing VNC? (Y/n): " USE_VNC
     if [[ ! "$USE_VNC" =~ ^[nN] ]]; then
       VNC_NEEDED="y"

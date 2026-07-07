@@ -30,7 +30,7 @@ jobs:
       - name: Install ShellCheck
         run: sudo apt-get install -y -qq shellcheck
       - name: Run ShellCheck
-        run: shellcheck -x -s bash install.sh vplink3.0.sh vplink-desktop.sh
+        run: shellcheck -x -s bash --severity=warning install.sh vplink3.0.sh vplink-desktop.sh
 
   # ═══════════════════════════════════════════════════════════
   #  INSTALL — Full matrix

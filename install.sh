@@ -213,14 +213,8 @@ is_termux() {
 has_cmd() { command -v "$1" &>/dev/null; }
 
 # Global variables (initialized)
-DISTRO=""
-DISTRO_FAMILY=""
-ARCH=""
-PKG_MANAGER=""
-PKG_UPDATE=""
-PKG_INSTALL=""
-PKG_QUERY=""
-OS=""
+# shellcheck disable=SC2034
+DISTRO="" && DISTRO_FAMILY="" && ARCH="" && PKG_MANAGER="" && PKG_UPDATE="" && PKG_INSTALL="" && PKG_QUERY="" && OS=""
 
 SUDO=""
 if ! is_root && ! is_termux; then
@@ -441,7 +435,7 @@ install_npm_deps() {
   npm install --no-audit --no-fund 2>&1 | tail -3 >> "$LOG_FILE" || {
     warn "npm install failed, retrying with cache clean..."
     npm cache clean --force 2>/dev/null || true
-    npm install --no-audit --no-fund 2>&1 >> "$LOG_FILE"
+    npm install --no-audit --no-fund >> "$LOG_FILE" 2>&1
   }
 
   if [ -d node_modules ]; then
@@ -463,7 +457,7 @@ install_playwright() {
     info "Installing Playwright Chromium browser..."
     npx playwright install chromium 2>&1 | tail -5 >> "$LOG_FILE" || {
       warn "Playwright install failed, retrying..."
-      npx playwright install chromium 2>&1 >> "$LOG_FILE"
+      npx playwright install chromium >> "$LOG_FILE" 2>&1
     }
   fi
 
@@ -495,7 +489,7 @@ setup_project() {
     fi
   else
     info "Cloning repository..."
-    git clone --depth=1 "$REPO" "$INSTALL_DIR" 2>&1 >> "$LOG_FILE" || {
+    git clone --depth=1 "$REPO" "$INSTALL_DIR" >> "$LOG_FILE" 2>&1 || {
       fail "Git clone failed. Check: $LOG_FILE"
       return 1
     }
@@ -786,7 +780,7 @@ self_update() {
   old_hash=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
 
   info "Fetching updates..."
-  git fetch origin 2>&1 >> "$LOG_FILE" || {
+  git fetch origin >> "$LOG_FILE" 2>&1 || {
     fail "Network error during fetch"
     return 1
   }
@@ -800,14 +794,14 @@ self_update() {
 
   info "Updating ($behind new commit(s))..."
   git stash --include-untracked 2>/dev/null || true
-  git pull --ff-only origin main 2>&1 >> "$LOG_FILE" || {
-    git reset --hard origin/main 2>&1 >> "$LOG_FILE"
+  git pull --ff-only origin main >> "$LOG_FILE" 2>&1 || {
+    git reset --hard origin/main >> "$LOG_FILE" 2>&1
   }
 
   # Reinstall npm deps if package.json changed
   if ! git diff --quiet "$old_hash" HEAD -- package.json 2>/dev/null; then
     info "package.json changed — reinstalling npm dependencies..."
-    npm install --no-audit --no-fund 2>&1 >> "$LOG_FILE"
+    npm install --no-audit --no-fund >> "$LOG_FILE" 2>&1
   fi
 
   # Reinstall Playwright if needed
@@ -845,7 +839,8 @@ main_install() {
 
   # Environment summary
   echo "  Environment: $(detect_os) / $DISTRO / $ARCH / libc:$(detect_libc)"
-  local mode_info="$(is_root && echo 'Root' || echo 'Non-root')"
+  local mode_info
+  mode_info="$(is_root && echo 'Root' || echo 'Non-root')"
   mode_info="$mode_info / $(is_docker && echo 'Container' || echo 'Bare-metal')"
   is_wsl && mode_info="$mode_info / WSL"
   is_ci && mode_info="$mode_info / CI"

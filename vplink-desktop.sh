@@ -8,7 +8,6 @@
 #   vplink-desktop status
 #   vplink-desktop password [--set] [--file PATH]
 
-SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 CONFIG_DIR="$HOME/.vplink3.0"
 CONFIG_FILE="$CONFIG_DIR/config.json"
 DISPLAY=""
@@ -20,6 +19,7 @@ VNC_PASSWD_FILE="$CONFIG_DIR/vnc.passwd"
 TIMESTAMP=""
 
 # ── Colors ──
+# shellcheck disable=SC2034
 BOLD='\033[1m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; CYAN='\033[0;36m'; NC='\033[0m'
 info()  { echo -e "  ${CYAN}${1}${NC}"; }
 ok()    { echo -e "  ${GREEN}✓${NC} ${1}"; }
@@ -151,7 +151,6 @@ load_state() {
 do_start() {
   local use_vnc=0
   local req_display=""
-  local req_password=""
 
   # Parse args
   while [ "$#" -gt 0 ]; do
@@ -206,7 +205,7 @@ do_start() {
   # Validate
   local validated=0
   if command -v xdpyinfo &>/dev/null; then
-    for attempt in 1 2 3; do
+    for _unused in 1 2 3; do
       if DISPLAY="$DISPLAY" xdpyinfo &>/dev/null; then
         validated=1
         break
