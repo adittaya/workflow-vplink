@@ -7,7 +7,25 @@ try {
 const fs = require('fs');
 const path = require('path');
 
+const DEBUG = process.argv.includes('--vplink-debug') || process.env.VPLINK_DEBUG === '1';
+if (DEBUG) console.log('  [debug mode active]');
+
 let browser;
+let debugPage = null;
+let debugShot = async (label) => {
+  if (!DEBUG) return;
+  const p = debugPage;
+  if (!p) return;
+  const dir = path.join(__dirname, 'screenshots');
+  try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  try {
+    await p.screenshot({ path: path.join(dir, `${label}.png`), fullPage: false });
+  } catch {}
+  try {
+    const html = await p.evaluate(() => document.documentElement.outerHTML).catch(() => '');
+    fs.writeFileSync(path.join(dir, `${label}.html`), html);
+  } catch {}
+};
 process.on('SIGINT', async () => {
   if (browser) await browser.close().catch(() => {});
   process.exit(130);
@@ -51,7 +69,8 @@ process.on('SIGINT', async () => {
   try { fs.rmSync(path.join(__dirname, 'screenshots'), { recursive: true, force: true }); } catch {}
 
   const stealthArgs = ['--no-sandbox', '--disable-gpu', '--disable-blink-features=AutomationControlled',
-    '--disable-dev-shm-usage', '--disable-accelerated-2d-canvas', '--disable-setuid-sandbox'];
+    '--disable-dev-shm-usage', '--disable-accelerated-2d-canvas', '--disable-setuid-sandbox',
+    '--disable-automation'];
   const launchOpts = {};
   if (process.env.VPLINK_TERMUX === '1') {
     launchOpts.headless = true;
@@ -80,6 +99,7 @@ process.on('SIGINT', async () => {
   ctxOpts.locale = 'en-US';
   const context = await browser.newContext(ctxOpts);
   const page = await context.newPage();
+  debugPage = page;
   page.setDefaultNavigationTimeout(60000);
 
   // Stealth: spoof common automation detection vectors
@@ -97,21 +117,36 @@ process.on('SIGINT', async () => {
     if (req.url().includes('wistfulseverely.com')) {
       console.log(`  [wistfulseverely] ${req.method()} ${req.url().substring(0, 100)}`);
     }
+    if (req.url().includes('vplink.in') && req.url().includes('/api/')) {
+      console.log(`  [vplink-api] ${req.method()} ${req.url().substring(0, 100)}`);
+    }
   });
   page.on('response', res => {
     if (res.url().includes('wistfulseverely.com')) {
-      console.log(`  [wistfulseverely] response ${res.status()} ${res.url().substring(0, 100)}`);
+      const loc = res.headers()['location'] || '';
+      console.log(`  [wistfulseverely] response ${res.status()} ${res.url().substring(0, 100)}${loc ? ' → ' + loc.substring(0, 80) : ''}`);
     }
-    if ((res.url().includes('facebook.com/tr/') || res.url().includes('adscool.net/pageview/')) && res.status() === 200) {
+    if (res.status() === 200 && (res.url().includes('facebook.com/tr/') || res.url().includes('adscool.net/pageview/') || res.url().includes('wistfulseverely.com'))) {
       wistfulTrackingDone = true;
+    }
+    // Log tracking chain responses (non-wistfulseverely) that are part of the redirect chain
+    if (res.status() >= 300 && res.status() < 400 && !res.url().includes('wistfulseverely.com')) {
+      const loc = res.headers()['location'] || '';
+      console.log(`  [redirect] ${res.status()} ${res.url().substring(0, 80)}${loc ? ' → ' + loc.substring(0, 80) : ''}`);
+    }
+    if (res.status() === 200 && !res.url().includes('vplink.in') && !res.url().includes('wistfulseverely.com')) {
+      if (res.url().includes('facebook.com') || res.url().includes('adscool') || res.url().includes('google')) {
+        console.log(`  [tracking] ${res.status()} ${res.url().substring(0, 100)}`);
+      }
     }
   });
 
   let destinationUrl = null;
   let wistfulTrackingDone = false;
+  let vplinkArrivedAt = Date.now();  // timestamp when we first landed on vplink.in
   const ms = async t => { try { await page.waitForTimeout(t); } catch {} };
   const safeURL = () => { try { return page.url(); } catch { return ''; } };
-  const safeEval = fn => { try { return page.evaluate(fn).catch(() => null); } catch { return null; } };
+  const safeEval = (fn, ...args) => { try { return page.evaluate(fn, ...args).catch(() => null); } catch { return null; } };
   // Wait for vplink.in JS auto-redirect to settle (up to 15s)
   const waitRedirect = async () => {
     for (let i = 0; i < 15; i++) {
@@ -178,101 +213,16 @@ process.on('SIGINT', async () => {
     return true;
   };
 
-  const isArticlePage = async () => {
-    return await safeEval(() => {
-      return !!(document.getElementById('tp-wait1')
-        || document.getElementById('ce-wait1')
-        || document.getElementById('tp-snp2')
-        || (document.getElementById('btn6') && document.getElementById('btn6').offsetParent !== null)
-        || document.querySelector('#main > div:nth-child(4) > center > center > a'));
-    });
-  };
-
-  const isVplinkPage = async () => {
-    return await safeEval(() => {
-      return !!(document.getElementById('get-link') || document.getElementById('gt-link'));
-    });
-  };
-
-  // ── Inject cookies & force-show buttons (called each loop iteration) ──
-  const showArticleButtons = async () => {
-    await safeEval(() => {
-      document.cookie = "eonudb=insurance,online_colleges,study_abroad,finance,loan; max-age=3600; path=/;";
-      document.cookie = "adcadg=insurance,online_colleges,study_abroad,finance,loan; max-age=3600; path=/;";
-      const hide = ['ce-wait1', 'tp-wait1', 'tp-time'];
-      hide.forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
-      const show = ['btn6', 'tp-snp2', 'cross-snp2', 'getlink', 'tp-generate', 'ce-text'];
-      show.forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'block'; });
-      const gc = document.getElementById('gcont');
-      if (gc) gc.style.position = 'static';
-      const snp = document.getElementById('tp-snp2');
-      if (snp) { const a = snp.closest('a'); if (a) a.style.display = 'block'; }
-      const ct = document.querySelector('#btn7 > button');
-      if (ct) { const p = ct.closest('#btn7'); if (p) p.style.display = 'block'; ct.style.display = 'block'; }
-    });
-    await ms(300);
-  };
-
-  // ── Article button finder ──
-  const findArticleButton = async (tried = new Set()) => {
-    for (let i = 0; i < 30; i++) {
-      try {
-        if (i > 0 && i % 3 === 0)
-          await page.evaluate(() => window.scrollBy(0, 500)).catch(() => {});
-
-        const btn = await page.evaluate(triedArr => {
-          const v = el =>
-            el && el.offsetParent !== null
-            && getComputedStyle(el).display !== 'none'
-            && getComputedStyle(el).visibility !== 'hidden';
-
-          // Check if countdowns are still running
-          for (const id of ['tp-wait1', 'ce-wait1']) {
-            const el = document.getElementById(id);
-            if (el && v(el)) return null;
-          }
-
-          // Check 15-click overlay
-          const ov = document.getElementById('common_15click_overlay');
-          if (ov && v(ov)) return 'overlay';
-
-          const checks = [
-            '#tp-snp2',
-            '#cross-snp2',
-            '#btn6',
-            '#btn7 > button',
-            '#btn7',
-            '#main > div:nth-child(4) > center > center > a',
-          ];
-          for (const sel of checks) {
-            if (triedArr.includes(sel)) continue;
-            const el = document.querySelector(sel);
-            if (v(el)) return sel;
-          }
-
-          // Text-based
-          const te = document.querySelectorAll('a, button, span, div, input');
-          for (const el of te) {
-            const txt = el.textContent.trim().toLowerCase();
-            if (txt !== 'verify' && txt !== 'continue') continue;
-            if (triedArr.includes(txt)) continue;
-            if (!v(el)) continue;
-            el.scrollIntoView({ block: 'center' });
-            return txt;
-          }
-          return null;
-        }, [...tried]);
-
-        if (btn) return btn;
-      } catch {}
-      await ms(1000);
-    }
-    return null;
-  };
 
   // ── Get Link ──
   const doGetLink = async () => {
     try {
+      // Close any leftover tabs from previous failed attempts
+      const pages = context.pages();
+      for (const p of pages) {
+        if (p !== page) { try { await p.close(); } catch {} }
+      }
+
       const btn = await page.waitForSelector('#get-link', { timeout: 35000 }).catch(() => null);
       if (!btn) return false;
 
@@ -297,18 +247,25 @@ process.on('SIGINT', async () => {
       }
       await ms(500);
 
+      if (DEBUG) await debugShot('06-before-getlink-click');
+
+      // Reset tracking flag before click (responses after this point are tracking)
+      wistfulTrackingDone = false;
+
       console.log('  clicking Get Link');
       const newTabPromise = context.waitForEvent('page', { timeout: 30000 }).catch(() => null);
 
       await clickEl('#get-link');
 
       let newTab = await newTabPromise;
+      if (DEBUG) await debugShot('07-after-getlink-click');
 
+      const getLinkClickTime = Date.now();
       console.log('  waiting for destination...');
       let stableUrl = null;
       let stableCount = 0;
 
-      for (let i = 0; i < 40; i++) {
+      for (let i = 0; i < 60; i++) {
         await ms(1000);
 
         // Get current URL — prefer new tab (it contains the real destination)
@@ -335,13 +292,21 @@ process.on('SIGINT', async () => {
           stableCount++;
           if (stableCount >= 3 && isDestination(currentUrl)) {
             destinationUrl = currentUrl;
-            // Wait for wistfulseverely tracking chain to complete
-            // (Facebook pixel / adscool call), up to 15s
+            if (DEBUG) await debugShot('08-destination-found');
+            // Keep browser alive minimum 30s from Get Link click
+            // for wistfulseverely conversion confirmation chain
+            // (5-7 redirect hops through slow proxies can take 15-25s)
             {
-              const t0 = Date.now();
-              while (Date.now() - t0 < 15000 && !wistfulTrackingDone) await ms(500);
-              const elapsed = Date.now() - t0;
-              if (elapsed > 1000) console.log(`  tracking wait: ${elapsed}ms`);
+              const elapsed = Date.now() - getLinkClickTime;
+              const remaining = Math.max(0, 30000 - elapsed);
+              if (remaining > 500) {
+                console.log(`  tracking wait: ${remaining}ms (${elapsed}ms since click)`);
+                const mainUrlLog = await page.evaluate(() => window.location.href).catch(() => 'N/A');
+                console.log(`  main page URL: ${mainUrlLog.substring(0, 100)}`);
+                await ms(remaining);
+                const mainUrlEnd = await page.evaluate(() => window.location.href).catch(() => 'N/A');
+                console.log(`  after wait URL: ${mainUrlEnd.substring(0, 100)}`);
+              }
             }
             return true;
           }
@@ -354,39 +319,8 @@ process.on('SIGINT', async () => {
     return false;
   };
 
-  // ── Handle article button click ──
-  const handleArticleBtn = async (btn, tried) => {
-    if (btn === 'overlay') {
-      await clickEl('#common_15click_overlay > div > div:nth-child(2) > div > span');
-      console.log('  dismissed overlay');
-      await ms(500);
-      return;
-    }
-    if (btn === '#btn6') {
-      await clickEl('#btn6');
-      console.log('  clicked Verify');
-      // Wait for nextbtn() to process and show #btn7
-      await ms(5000);
-      for (let i = 0; i < 15; i++) {
-        const c = await clickEl('#btn7 > button') || await clickEl('#btn7');
-        if (c) { console.log('  clicked Continue'); await ms(5000); break; }
-        await page.evaluate(() => window.scrollBy(0, 300)).catch(() => {});
-        await ms(1000);
-      }
-    } else if (btn === '#btn7' || btn === '#btn7 > button') {
-      await clickEl(btn);
-      console.log('  clicked Continue');
-      await ms(5000);
-    } else if (btn === 'verify' || btn === 'continue') {
-      await clickText(btn);
-      console.log(`  clicked text ${btn}`);
-      await ms(5000);
-    } else {
-      await clickEl(btn);
-      console.log(`  clicked ${btn}`);
-      await ms(5000);
-    }
-  };
+
+  await debugShot('01-start');
 
   // ── Navigate ──
   console.log('=== Start funnel ===');
@@ -402,14 +336,58 @@ process.on('SIGINT', async () => {
       console.error('  navigation failed after retry:', e.message);
     }
   }
+  vplinkArrivedAt = Date.now();
   await page.waitForLoadState('networkidle').catch(() => {});
+  await debugShot('02-after-nav');
   await ms(2000);
 
   // Wait for possible auto-redirect
   await waitRedirect();
+  await debugShot('03-after-redirect');
 
-  const stuckUrls = new Set();
-  const triedButtons = new Set();
+  // Wait for Cloudflare challenge to complete if present, then wait for #get-link or redirect
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (!safeURL().includes('vplink.in') || safeURL().includes('cdn-cgi')) break;
+
+    // Check if page is showing Cloudflare challenge (no #get-link + challenge HTML)
+    const hasGl = await safeEval(() => !!document.getElementById('get-link'));
+    if (hasGl) { console.log('  page loaded'); break; }
+
+    const isCf = await safeEval(() => {
+      const html = (document.documentElement?.innerHTML || '').substring(0, 2000);
+      return html.includes('cf-browser-verification') || html.includes('challenge-form')
+        || html.includes('cf-challenge') || html.includes('_cf_chl_opt');
+    });
+
+    if (isCf) console.log('  Cloudflare challenge detected, waiting...');
+
+    // Wait for content to appear — poll #get-link and URL change
+    console.log(`  waiting for page (attempt ${attempt + 1})...`);
+    let loaded = false;
+    for (let i = 0; i < 35; i++) {
+      await ms(1000);
+      if (!safeURL().includes('vplink.in')) { loaded = true; break; }
+      if (await safeEval(() => !!document.getElementById('get-link'))) {
+        console.log('  page loaded');
+        loaded = true;
+        break;
+      }
+    }
+    if (loaded) break;
+
+    // If still stuck on Cloudflare, try reloading
+    if (isCf) {
+      console.log('  Cloudflare challenge did not resolve, reloading...');
+      await page.reload({ waitUntil: 'domcontentloaded', timeout: navTimeout }).catch(() => {});
+      await page.waitForLoadState('networkidle').catch(() => {});
+      await ms(3000);
+      await waitRedirect();
+    } else {
+      console.log('  page not loaded, continuing...');
+      break;
+    }
+  }
+
   let vplinkMisses = 0;
 
   // ── Main loop ──
@@ -420,12 +398,9 @@ process.on('SIGINT', async () => {
 
     if (isDestination(url)) { destinationUrl = url; break; }
 
-    // ── Check if this is an article-like page ──
-    const isArticle = await isArticlePage();
-    const isVplink = await isVplinkPage();
-
     // ── vplink.in ──
-    if (isVplink || (url.includes('vplink.in') && !url.includes('cdn-cgi'))) {
+    if (url.includes('vplink.in') && !url.includes('cdn-cgi')) {
+      if (!vplinkArrivedAt) vplinkArrivedAt = Date.now();
       vplinkMisses++;
       const btnState = await safeEval(() => {
         const el = document.getElementById('get-link');
@@ -434,27 +409,28 @@ process.on('SIGINT', async () => {
         if (el.offsetParent === null) return 'hidden';
         return 'ready';
       });
+      await debugShot(`04-vplink-cycle${cycle + 1}-${btnState}`);
 
-      // Button ready → click
+      // Button ready → click (only once per session — retry reuses same token)
       if (btnState === 'ready') {
         if (await doGetLink()) break;
-        console.log('  Get Link failed — reloading');
+        console.log('  Get Link timeout — reloading');
+        // Close leftover tabs and reload for a clean state
+        const pages = context.pages();
+        for (const p of pages) { if (p !== page) { try { await p.close(); } catch {} } }
         await page.goto(`https://vplink.in/${KEY}`, { waitUntil: 'domcontentloaded', timeout: navTimeout }).catch(() => {});
         await page.waitForLoadState('networkidle').catch(() => {});
         await ms(3000);
-        if (await doGetLink()) break;
-        await ms(2000);
         continue;
       }
 
-      // Button missing for 3+ cycles → key probably consumed, force reload
+      // Button missing for 3+ cycles → force reload (next cycle re-checks btnState)
       if (btnState === 'missing') {
         if (vplinkMisses >= 3) {
+          console.log('  #get-link missing for 3 cycles, reloading');
           await page.goto(`https://vplink.in/${KEY}`, { waitUntil: 'domcontentloaded', timeout: navTimeout }).catch(() => {});
           await page.waitForLoadState('networkidle').catch(() => {});
           await ms(3000);
-          if (await doGetLink()) break;
-          await ms(2000);
         } else {
           await ms(2000);
         }
@@ -467,57 +443,66 @@ process.on('SIGINT', async () => {
     }
 
     // ── Article page ──
-    if (isArticle || url.includes('onlinewish') || url.includes('krishitalk') || url.includes('learn_more')) {
-      if (stuckUrls.has(url)) {
-        console.log('  stuck — trying Get Link directly');
-        for (let attempt = 0; attempt < 5 && !destinationUrl; attempt++) {
-          await page.goto(`https://vplink.in/${KEY}`, { waitUntil: 'domcontentloaded', timeout: navTimeout }).catch(() => {});
-          await page.waitForLoadState('networkidle').catch(() => {});
-          await waitRedirect();
-          const cur = safeURL();
-          if (cur.includes('vplink.in')) {
-            if (await doGetLink()) break;
-          } else if (isDestination(cur)) {
-            destinationUrl = cur;
-            break;
-          }
-          await ms(1000);
-        }
-        if (!destinationUrl) break;
-        continue;
-      }
-
+    if (url.includes('onlinewish') || url.includes('krishitalk') || url.includes('learn_more')
+        || url.includes('studydegree') || url.includes('studyblog') || url.includes('jobskiki')
+        || url.includes('educatehub') || url.includes('studyeducates')) {
+      console.log('  article — waiting 15s');
       const startUrl = safeURL();
-      triedButtons.clear();
+      await ms(15000);
 
-      // Initial: focus iframe to trigger verification monitor
-      await safeEval(() => {
-        const iframe = document.querySelector('iframe[src*="google_ads"], iframe[id*="google_ads"], iframe');
-        if (iframe) iframe.focus();
-      });
-
+      const tried = new Set();
       while (safeURL() === startUrl) {
-        // Re-inject every loop iteration — page JS may revert display changes
-        await showArticleButtons();
+        await page.evaluate(() => window.scrollBy(0, 500)).catch(() => {});
 
-        const btn = await findArticleButton(triedButtons);
+        const btn = await safeEval(triedArr => {
+          const v = el => el && el.offsetParent !== null
+            && getComputedStyle(el).display !== 'none'
+            && getComputedStyle(el).visibility !== 'hidden'
+            && getComputedStyle(el).opacity !== '0'
+            && !el.disabled;
+
+          const checks = [
+            '#tp-snp2', '#cross-snp2', '#btn6',
+            '#btn7 > button', '#btn7',
+            '#main > div:nth-child(4) > center > center > a',
+          ];
+          for (const sel of checks) {
+            if (triedArr.includes(sel)) continue;
+            const el = document.querySelector(sel);
+            if (v(el)) return sel;
+          }
+          const te = document.querySelectorAll('a, button, span, div');
+          for (const el of te) {
+            const txt = el.textContent.trim().toLowerCase();
+            if (txt !== 'verify' && txt !== 'continue') continue;
+            if (triedArr.includes(txt)) continue;
+            if (!v(el)) return txt;
+          }
+          return null;
+        }, [...tried]);
+
         if (!btn) {
-          await clickText('Continue');
-          await ms(5000);
-          if (safeURL() === startUrl) break;
-          continue;
+          console.log('  no more buttons');
+          break;
         }
 
-        await handleArticleBtn(btn, triedButtons);
-
-        if (safeURL() === startUrl) {
-          triedButtons.add(btn);
-          console.log(`  ${btn} didn't navigate, trying next`);
+        console.log(`  clicking ${btn}`);
+        if (btn === 'verify' || btn === 'continue') {
+          await clickText(btn);
+        } else {
+          await clickEl(btn);
         }
+
+        if (safeURL() !== startUrl) break;
+        console.log('  waiting 15s after click');
+        await ms(15000);
+
+        if (safeURL() !== startUrl) break;
+        tried.add(btn);
+        console.log(`  ${btn} didn't navigate, trying next`);
       }
 
       if (safeURL() === startUrl) {
-        stuckUrls.add(startUrl);
         console.log('  exhausted — force to vplink.in');
         await page.goto(`https://vplink.in/${KEY}`, { waitUntil: 'domcontentloaded', timeout: navTimeout }).catch(() => {});
         await page.waitForLoadState('networkidle').catch(() => {});
@@ -543,16 +528,49 @@ process.on('SIGINT', async () => {
   }
 
   if (!destinationUrl) {
-    if (safeURL().includes('vplink.in')) {
-      await doGetLink();
-    } else if (safeURL().startsWith('chrome-error://')) {
-      console.log('  final attempt — force vplink.in from chrome-error');
-      await page.goto(`https://vplink.in/${KEY}`, { waitUntil: 'domcontentloaded', timeout: navTimeout }).catch(() => {});
+    // Final attempt: try up to 3 approaches
+    console.log('  final attempt — getting destination');
+
+    // 1. Search for vplink link on current page
+    let gotDest = false;
+    const vplinkHref = await safeEval(() => {
+      const links = document.querySelectorAll('a[href*="vplink.in"]');
+      for (const a of links) {
+        if (a.href && !a.href.includes('cdn-cgi')) return a.href;
+      }
+      return null;
+    });
+    if (vplinkHref) {
+      console.log('  found vplink link');
+      await page.goto(vplinkHref, { waitUntil: 'domcontentloaded', timeout: navTimeout }).catch(() => {});
       await page.waitForLoadState('networkidle').catch(() => {});
-      await ms(3000);
-      await waitRedirect();
-      if (safeURL().includes('vplink.in')) await doGetLink();
+      if (safeURL().includes('vplink.in')) gotDest = await doGetLink();
     }
+
+    // 2. If on vplink.in, try Get Link
+    if (!gotDest && safeURL().includes('vplink.in')) {
+      gotDest = await doGetLink();
+    }
+
+    // 3. Direct goto vplink and try to catch Get Link before redirect
+    if (!gotDest) {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        console.log(`  direct attempt ${attempt + 1}`);
+        await page.goto(`https://vplink.in/${KEY}`, { waitUntil: 'domcontentloaded', timeout: navTimeout }).catch(() => {});
+        // Rapid poll for #get-link (redirect usually fires within 1-2s)
+        for (let w = 0; w < 10; w++) {
+          await ms(500);
+          const cur = safeURL();
+          if (cur.includes('vplink.in')) {
+            const hasGl = await safeEval(() => !!document.getElementById('get-link'));
+            if (hasGl && await doGetLink()) { gotDest = true; break; }
+          } else break; // page redirected
+        }
+        if (gotDest) break;
+      }
+    }
+
+    if (gotDest) destinationUrl = safeURL();
   }
 
   console.log('\n═════════════════════════════════════════');

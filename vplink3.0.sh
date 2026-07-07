@@ -251,9 +251,6 @@ read -p "Proceed? (Y/n): " CONFIRM
 [[ "$CONFIRM" =~ ^[nN] ]] && { echo "Aborted."; exit 0; }
 echo ""
 
-# ── Cleanup old artifacts ──
-deep_cleanup
-
 # ════════════════════════════════════════════════════════
 #  RUN LOOP
 # ════════════════════════════════════════════════════════
@@ -266,6 +263,7 @@ for (( i=1; i<=VIEWS; i++ )); do
   echo "  View $i of $VIEWS"
   echo "══════════════════════════════════════════════"
 
+  deep_cleanup
   cleanup_pids
   sleep 1
 
@@ -358,7 +356,9 @@ for (( i=1; i<=VIEWS; i++ )); do
   # ── Run automation ─────────────────────────────────
   cd "$SCRIPT_DIR"
   info "Starting automation (timeout: 480s)..."
-  timeout 480 $NODE_BIN "$AUTOMATION" "$CURRENT_KEY"
+  DEBUG_FLAG=""
+  [ "${VPLINK_DEBUG:-0}" = "1" ] && DEBUG_FLAG="--vplink-debug"
+  timeout 480 $NODE_BIN "$AUTOMATION" "$CURRENT_KEY" $DEBUG_FLAG
   EXIT_CODE=$?
   if [ "$EXIT_CODE" -eq 124 ]; then
     warn "Automation timed out after 480s"
