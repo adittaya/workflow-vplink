@@ -67,18 +67,16 @@ jobs:
           - container: opensuse/leap:15.6
             label: openSUSE Leap 15.6
             deps: zypper install -y curl git ca-certificates
+    runs-on: ubuntu-latest
     container:
       image: ${{ matrix.container }}
       options: --user root
     steps:
       - uses: actions/checkout@v4
-
       - name: Install base dependencies
         run: ${{ matrix.deps }}
-
       - name: Run installer
         run: bash install.sh 2>&1 | tail -20
-
       - name: Verify global command
         run: |
           if command -v vplink3.0; then
@@ -88,12 +86,10 @@ jobs:
             echo "PATH=$PATH"
             exit 1
           fi
-
       - name: Verify install state
         run: |
           [ -f /root/.vplink3.0/install_state.json ] && echo "✓ State file exists"
           [ -f /root/.vplink3.0/config.json ] && echo "✓ Config file exists"
-
       - name: Idempotency test (re-run installer)
         run: |
           bash install.sh 2>&1
@@ -119,21 +115,18 @@ jobs:
           - container: fedora:40
             label: Fedora 40
             deps: dnf install -y curl git ca-certificates
+    runs-on: ubuntu-latest
     container:
       image: ${{ matrix.container }}
       options: --user root
     steps:
       - uses: actions/checkout@v4
-
       - name: Install base dependencies
         run: ${{ matrix.deps }}
-
       - name: Install
         run: bash install.sh
-
       - name: Uninstall
         run: bash install.sh uninstall --all
-
       - name: Verify removal
         run: |
           if command -v vplink3.0 &>/dev/null; then
@@ -143,7 +136,6 @@ jobs:
           echo "✓ vplink3.0 removed from PATH"
           [ -d /root/vplink3.0 ] && echo "✗ Project dir still exists" && exit 1 || echo "✓ Project dir removed"
           [ -d /root/.vplink3.0 ] && echo "✓ Config dir kept (expected)" || echo "✓ No config dir"
-
       - name: Reinstall clean
         run: bash install.sh
         env:
