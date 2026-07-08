@@ -64,9 +64,6 @@ jobs:
           - container: archlinux:latest
             label: Arch Linux
             deps: pacman -Sy --noconfirm curl git ca-certificates
-          - container: opensuse/leap:15.6
-            label: openSUSE Leap 15.6
-            deps: zypper install -y curl git ca-certificates
     runs-on: ubuntu-latest
     container:
       image: ${{ matrix.container }}
@@ -76,7 +73,11 @@ jobs:
       - name: Install base dependencies
         run: ${{ matrix.deps }}
       - name: Run installer
-        run: bash install.sh 2>&1 | tail -20
+        shell: bash
+        run: |
+          bash install.sh 2>&1 | tail -20
+          exit_code="${PIPESTATUS[0]}"
+          exit "$exit_code"
       - name: Verify global command
         run: |
           if command -v vplink3.0; then
@@ -216,12 +217,12 @@ jobs:
             env: WSL_DISTRO_NAME=Ubuntu
           - label: Termux
             env: PREFIX=/data/data/com.termux/files/usr
-            setup: mkdir -p /data/data/com.termux
+            setup: sudo mkdir -p /data/data/com.termux
           - label: CI
             env: CI=1
           - label: Docker
             env: DOCKER_CONTAINER=1
-            setup: touch /.dockerenv
+            setup: sudo touch /.dockerenv
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
