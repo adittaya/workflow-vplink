@@ -74,6 +74,8 @@ jobs:
         run: ${{ matrix.deps }}
       - name: Run installer
         shell: bash
+        env:
+          INSTALL_DIR: ${{ github.workspace }}
         run: |
           bash -x install.sh 2>&1 | tail -50
           exit_code="${PIPESTATUS[0]}"
