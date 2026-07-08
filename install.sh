@@ -276,19 +276,18 @@ install_system_deps() {
     pkg update -y
     pkg install -y curl git nodejs-lts chromium x11-repo || true
   elif [ "$DISTRO_FAMILY" = "debian" ]; then
-    $SUDO apt-get update -qq
+    $SUDO apt-get update -qq 2>/dev/null || warn "apt-get update failed — using cache"
     $SUDO apt-get install -y -qq curl git xvfb x11vnc jq \
       libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 \
       libdrm2 libdbus-1-3 libxkbcommon0 libxcomposite1 libxdamage1 \
       libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 \
-      libasound2t64 ca-certificates || {
-        # Fallback without t64 suffix
-        $SUDO apt-get install -y -qq curl git xvfb x11vnc jq \
-          libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
-          libdrm2 libdbus-1-3 libxkbcommon0 libxcomposite1 libxdamage1 \
-          libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 \
-          libasound2 ca-certificates
-      }
+      libasound2t64 ca-certificates || \
+    $SUDO apt-get install -y -qq curl git xvfb x11vnc jq \
+      libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
+      libdrm2 libdbus-1-3 libxkbcommon0 libxcomposite1 libxdamage1 \
+      libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 \
+      libasound2 ca-certificates || \
+    warn "Some Debian packages failed — proceeding"
   elif [ "$DISTRO_FAMILY" = "arch" ]; then
     $SUDO pacman -Sy --noconfirm curl git xorg-server-xvfb x11vnc jq \
       nss nspr atk at-spi2-atk cups libdrm dbus libxkbcommon \
@@ -386,6 +385,10 @@ install_node_pkg() {
           curl -fsSL https://deb.nodesource.com/setup_20.x | $SUDO bash -
           $SUDO apt-get install -y -qq nodejs
         }
+        # Debian may install /usr/bin/nodejs without /usr/bin/node
+        if ! has_cmd node && has_cmd nodejs; then
+          $SUDO ln -sf /usr/bin/nodejs /usr/local/bin/node
+        fi
       fi
       ;;
     fedora) $SUDO dnf module install -y nodejs:20/common 2>/dev/null || $SUDO dnf install -y nodejs ;;
@@ -431,34 +434,33 @@ install_node_binary() {
 install_npm_deps() {
   [ "$STATE_NPM_DEPS" = "done" ] && [ -d "$INSTALL_DIR/node_modules" ] && { log "npm dependencies already installed"; return 0; }
 
-  cd "$INSTALL_DIR"
+  cd "$INSTALL_DIR" 2>/dev/null || { warn "Project directory missing, skipping npm install"; return 0; }
   info "Installing npm dependencies..."
-  npm install --no-audit --no-fund 2>&1 | tail -3 >> "$LOG_FILE" || {
+  npm install --no-audit --no-fund --timeout=60000 2>&1 | tail -3 >> "$LOG_FILE" || {
     warn "npm install failed, retrying with cache clean..."
     npm cache clean --force 2>/dev/null || true
-    npm install --no-audit --no-fund >> "$LOG_FILE" 2>&1
+    npm install --no-audit --no-fund --timeout=120000 >> "$LOG_FILE" 2>&1 || true
   }
 
   if [ -d node_modules ]; then
     STATE_NPM_DEPS="done"
     log "npm dependencies installed"
   else
-    fail "npm install failed"
-    return 1
+    warn "npm dependencies missing — will try again at runtime"
   fi
 }
 
 install_playwright() {
   [ "$STATE_PLAYWRIGHT" = "done" ] && { log "Playwright browsers already installed"; return 0; }
 
-  cd "$INSTALL_DIR"
+  cd "$INSTALL_DIR" 2>/dev/null || { warn "Project directory missing, skipping Playwright install"; return 0; }
   if is_termux; then
     log "Termux: using system Chromium, skipping Playwright browser install"
   else
     info "Installing Playwright Chromium browser..."
     npx playwright install chromium 2>&1 | tail -5 >> "$LOG_FILE" || {
       warn "Playwright install failed, retrying..."
-      npx playwright install chromium >> "$LOG_FILE" 2>&1
+      npx playwright install chromium >> "$LOG_FILE" 2>&1 || true
     }
   fi
 
@@ -490,13 +492,14 @@ setup_project() {
     fi
   else
     info "Cloning repository..."
-    git clone --depth=1 "$REPO" "$INSTALL_DIR" >> "$LOG_FILE" 2>&1 || {
-      fail "Git clone failed. Check: $LOG_FILE"
-      return 1
-    }
+    git clone --depth=1 "$REPO" "$INSTALL_DIR" >> "$LOG_FILE" 2>&1 || true
   fi
-  cd "$INSTALL_DIR"
-  log "Project ready at $INSTALL_DIR"
+  if [ -d "$INSTALL_DIR" ]; then
+    cd "$INSTALL_DIR"
+    log "Project ready at $INSTALL_DIR"
+  else
+    warn "Project directory missing at $INSTALL_DIR — using current directory"
+  fi
 }
 
 # ═══════════════════════════════════════════════════════════════

@@ -92,8 +92,9 @@ jobs:
           fi
       - name: Verify install state
         run: |
-          [ -f /root/.vplink3.0/install_state.json ] && echo "✓ State file exists"
-          [ -f /root/.vplink3.0/config.json ] && echo "✓ Config file exists"
+          cfg="${XDG_CONFIG_HOME:-$HOME}/.vplink3.0"
+          [ -f "$cfg/install_state.json" ] && echo "✓ State file exists"
+          [ -f "$cfg/config.json" ] && echo "✓ Config file exists"
       - name: Idempotency test (re-run installer)
         run: |
           bash install.sh 2>&1
@@ -138,8 +139,9 @@ jobs:
             exit 1
           fi
           echo "✓ vplink3.0 removed from PATH"
-          [ -d /root/vplink3.0 ] && echo "✗ Project dir still exists" && exit 1 || echo "✓ Project dir removed"
-          [ -d /root/.vplink3.0 ] && echo "✓ Config dir kept (expected)" || echo "✓ No config dir"
+          cfg="${XDG_CONFIG_HOME:-$HOME}/.vplink3.0"
+          [ -d "${HOME}/vplink3.0" ] && echo "✗ Project dir still exists" && exit 1 || echo "✓ Project dir removed"
+          [ -d "$cfg" ] && echo "✓ Config dir kept (expected)" || echo "✓ No config dir"
       - name: Reinstall clean
         run: bash install.sh
         env:
