@@ -911,8 +911,11 @@ main_install() {
 }
 
 # ═══════════════════════════════════════════════════════════════
-#  CLI DISPATCH
+#  MAIN DISPATCH
 # ═══════════════════════════════════════════════════════════════
+
+# Only run dispatch when executed directly (not when sourced for tests)
+if [ "${BASH_SOURCE[0]}" = "$0" ] || [ -z "${BASH_SOURCE[0]}" ]; then
 
 case "${1:-install}" in
   install)
@@ -945,4 +948,6 @@ case "${1:-install}" in
     echo "Usage: bash install.sh {install|uninstall|update|--help}"
     exit 1
     ;;
-esac
+  esac
+
+fi
