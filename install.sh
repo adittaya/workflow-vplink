@@ -245,6 +245,7 @@ load_state() {
 }
 
 save_state() {
+  mkdir -p "$(dirname "$STATE_FILE")"
   cat > "$STATE_FILE" <<EOF
 {
   "sys_deps": "${STATE_SYS_DEPS:-done}",
