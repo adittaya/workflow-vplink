@@ -293,22 +293,22 @@ install_system_deps() {
     $SUDO pacman -Sy --noconfirm curl git xorg-server-xvfb x11vnc jq \
       nss nspr atk at-spi2-atk cups libdrm dbus libxkbcommon \
       libxcomposite libxdamage libxfixes libxrandr libgbm pango cairo alsa-lib \
-      ca-certificates
+      ca-certificates || warn "Some Arch packages failed — proceeding"
   elif [ "$DISTRO_FAMILY" = "fedora" ]; then
     $SUDO dnf install -y curl git xorg-x11-server-Xvfb x11vnc jq \
       nss nspr atk at-spi2-atk cups-libs libdrm dbus-libs libxkbcommon \
       libXcomposite libXdamage libXfixes libXrandr libgbm pango cairo alsa-lib \
-      ca-certificates
+      ca-certificates || warn "Some Fedora packages failed — proceeding"
   elif [ "$DISTRO_FAMILY" = "suse" ]; then
     $SUDO zypper install -y curl git xvfb x11vnc jq \
       nss nspr atk at-spi2-atk cups-libs libdrm dbus-1 libxkbcommon0 \
       libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 \
-      pango cairo alsa-lib ca-certificates
+      pango cairo alsa-lib ca-certificates || warn "Some SUSE packages failed — proceeding"
   elif [ "$DISTRO_FAMILY" = "alpine" ]; then
     $SUDO apk add curl git xvfb x11vnc jq \
       nss nspr atk at-spi2-atk cups-libs libdrm dbus libxkbcommon \
       libxcomposite libxdamage libxfixes libxrandr libgbm pango cairo alsa-lib \
-      ca-certificates
+      ca-certificates || warn "Some Alpine packages failed — proceeding"
   else
     warn "Unknown distro. Attempting package install..."
     # Try every known package manager
@@ -482,8 +482,8 @@ setup_project() {
       info "Updating existing installation..."
       git pull --ff-only 2>&1 | tail -2 >> "$LOG_FILE" || {
         warn "Git pull failed, trying fetch+reset..."
-        git fetch origin
-        git reset --hard origin/main
+        git fetch origin >> "$LOG_FILE" 2>&1 || true
+        git reset --hard origin/main 2>/dev/null || git reset --hard HEAD || true
       }
     else
       warn "Directory exists but not a git repo — will use as-is"
