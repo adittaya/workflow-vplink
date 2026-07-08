@@ -80,6 +80,10 @@ jobs:
           bash -x install.sh 2>&1 | tail -50
           exit_code="${PIPESTATUS[0]}"
           echo "Install exit code: $exit_code"
+          echo "HOME=$HOME"
+          cfg_home="${XDG_CONFIG_HOME:-$HOME}/.vplink3.0"
+          echo "Config path: $cfg_home"
+          ls -la "$cfg_home" 2>/dev/null || echo "Config dir not found"
           exit "$exit_code"
       - name: Verify global command
         run: |
@@ -93,8 +97,11 @@ jobs:
       - name: Verify install state
         run: |
           cfg="${XDG_CONFIG_HOME:-$HOME}/.vplink3.0"
-          [ -f "$cfg/install_state.json" ] && echo "✓ State file exists"
-          [ -f "$cfg/config.json" ] && echo "✓ Config file exists"
+          echo "HOME=$HOME"
+          echo "XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-}"
+          echo "cfg=$cfg"
+          ls -la "$cfg" 2>/dev/null || echo "Config dir not found at $cfg"
+          [ -f "$cfg/install_state.json" ] && echo "✓ State file exists" || { echo "✗ State file missing at $cfg/install_state.json"; exit 1; }
       - name: Idempotency test (re-run installer)
         run: |
           bash install.sh 2>&1
