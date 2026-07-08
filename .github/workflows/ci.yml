@@ -168,24 +168,22 @@ jobs:
       - name: Build and test in Docker
         run: |
           cat > /tmp/Dockerfile.test <<'DEOF'
-          FROM ubuntu:24.04
-          ENV CI=1 VPLINK_NONINTERACTIVE=1
-          RUN apt-get update -qq && apt-get install -y -qq curl git ca-certificates
-          COPY . /opt/vplink3.0-src
+FROM ubuntu:24.04
+ENV CI=1 VPLINK_NONINTERACTIVE=1
+RUN apt-get update -qq && apt-get install -y -qq curl git ca-certificates
+COPY . /opt/vplink3.0-src
 
-          # Fresh install
-          RUN bash /opt/vplink3.0-src/install.sh
-          RUN command -v vplink3.0 || (echo "✗ install failed" && exit 1)
+# Fresh install
+RUN bash /opt/vplink3.0-src/install.sh && command -v vplink3.0 || (echo "✗ install failed" && exit 1)
 
-          # Uninstall
-          RUN bash /opt/vplink3.0-src/install.sh uninstall --all
-          RUN command -v vplink3.0 && exit 1 || echo "✓ uninstalled"
-          RUN [ ! -d /root/vplink3.0 ] && echo "✓ project dir removed"
+# Uninstall
+RUN bash /opt/vplink3.0-src/install.sh uninstall --all
+RUN command -v vplink3.0 && exit 1 || echo "✓ uninstalled"
+RUN [ ! -d /root/vplink3.0 ] && echo "✓ project dir removed"
 
-          # Reinstall
-          RUN bash /opt/vplink3.0-src/install.sh
-          RUN command -v vplink3.0 || (echo "✗ reinstall failed" && exit 1)
-          DEOF
+# Reinstall
+RUN bash /opt/vplink3.0-src/install.sh && command -v vplink3.0 || (echo "✗ reinstall failed" && exit 1)
+DEOF
           sudo docker build -t vplink-test -f /tmp/Dockerfile.test .
           echo "✓ Docker test passed"
 
