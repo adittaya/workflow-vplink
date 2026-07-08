@@ -75,8 +75,9 @@ jobs:
       - name: Run installer
         shell: bash
         run: |
-          bash install.sh 2>&1 | tail -20
+          bash -x install.sh 2>&1 | tail -50
           exit_code="${PIPESTATUS[0]}"
+          echo "Install exit code: $exit_code"
           exit "$exit_code"
       - name: Verify global command
         run: |
@@ -174,7 +175,7 @@ jobs:
           RUN bash /opt/vplink3.0-src/install.sh
           RUN command -v vplink3.0 || (echo "✗ reinstall failed" && exit 1)
           DEOF
-          docker build -t vplink-test -f /tmp/Dockerfile.test .
+          sudo docker build -t vplink-test -f /tmp/Dockerfile.test .
           echo "✓ Docker test passed"
 
   # ═══════════════════════════════════════════════════════════
