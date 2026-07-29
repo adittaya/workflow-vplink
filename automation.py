@@ -3063,119 +3063,62 @@ def navigate_youtube_for_vplink(video_url):
         except Exception:
             pass
 
-    # ── FIND VPLink URL in shadow DOM and tap at exact text position ──
-    # YouTube's yt-formatted-string parses URLs in comment text and wraps them
-    # in <a> elements inside its shadow root. We tap at the <a>'s position.
-    # NOTE: Only search comment containers — not the full document (avoids slowdown)
+    # ── FIND and tap the VPLink element ──
     clicked = False
     el_href = ''
     if vplink_url:
-        tap_coords = safe_eval("""
-            var search = arguments[0];
-            function isClickable(el) {
-                if (!el || !el.offsetParent) return false;
-                var r = el.getBoundingClientRect();
-                if (r.width < 2 || r.height < 2) return false;
-                var s = window.getComputedStyle(el);
-                return s.display !== 'none' && s.visibility !== 'hidden' && s.pointerEvents !== 'none';
-            }
-            function findLink(root) {
-                if (!root || !root.querySelectorAll) return null;
-                var links = root.querySelectorAll('a');
-                for (var i = 0, lim = Math.min(links.length, 100); i < lim; i++) {
-                    var h = links[i].href || '';
-                    if ((h.indexOf('vplink.in') > -1 || (h.indexOf('/redirect') > -1 && h.indexOf('vplink') > -1)) && isClickable(links[i])) {
-                        return links[i];
-                    }
-                }
-                var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
-                var node, maxNodes = 500;
-                while ((node = walker.nextNode()) && maxNodes-- > 0) {
-                    if (node.textContent.indexOf('vplink.in') > -1) {
-                        var p = node.parentElement;
-                        while (p && p !== root) {
-                            if (isClickable(p)) return p;
-                            p = p.parentElement;
-                        }
-                        return node.parentElement;
-                    }
-                }
-                return null;
-            }
-            // Only search comment threads and yt-formatted-string within them
+        # Quick search for the VPLink <a> element (comment containers only, no full DOM crawl)
+        el_info = safe_eval("""
+            var url = arguments[0];
             var containers = document.querySelectorAll(
-                'ytd-comment-view-model, ytm-comment-view-model, '
-                + 'ytd-comment-thread-renderer, ytm-comment-thread-renderer, '
-                + '#content-text, ytd-comments');
-            var el = null;
-            for (var i = 0; i < containers.length && !el; i++) {
-                el = findLink(containers[i]);
-                if (!el && containers[i].shadowRoot) el = findLink(containers[i].shadowRoot);
-            }
-            // Also check yt-formatted-string that are INSIDE comment containers
-            if (!el) {
-                var fss = document.querySelectorAll(
-                    'ytd-comment-view-model yt-formatted-string, '
-                    + 'ytm-comment-view-model yt-formatted-string');
-                for (var i = 0; i < Math.min(fss.length, 50) && !el; i++) {
-                    if (fss[i].shadowRoot) el = findLink(fss[i].shadowRoot);
+                'ytd-comment-view-model, ytm-comment-view-model, #content-text');
+            for (var c = 0; c < containers.length; c++) {
+                var root = containers[c].shadowRoot || containers[c];
+                // Look for <a> with vplink href first
+                var links = root.querySelectorAll('a');
+                for (var i = 0; i < links.length; i++) {
+                    var h = links[i].href || '';
+                    if (h.indexOf('vplink.in') > -1 || (h.indexOf('/redirect') > -1 && h.indexOf('vplink') > -1)) {
+                        links[i].scrollIntoView({block:'center'});
+                        var r = links[i].getBoundingClientRect();
+                        return JSON.stringify({
+                            found: true, tag: links[i].tagName,
+                            cx: Math.round(r.left + r.width/2), cy: Math.round(r.top + r.height/2),
+                            href: (links[i].href || '').slice(0,200)
+                        });
+                    }
                 }
-            }
-            if (el) {
-                el.scrollIntoView({block:'center'});
-                var r = el.getBoundingClientRect();
-                return JSON.stringify({
-                    found: true,
-                    tag: el.tagName,
-                    cx: Math.round(r.left + r.width/2),
-                    cy: Math.round(r.top + r.height/2),
-                    w: Math.round(r.width),
-                    h: Math.round(r.height),
-                    href: (el.href || '').slice(0,200)
-                });
             }
             return 'null';
         """, vplink_url)
 
-        tp = None
-        if tap_coords and tap_coords != 'null':
+        ei = None
+        if el_info and el_info != 'null':
             try:
-                import json as _j_tp
-                tp = _j_tp.loads(tap_coords)
+                import json as _j_ei
+                ei = _j_ei.loads(el_info)
             except Exception:
                 pass
 
-        if tp and tp.get('found'):
-            cx, cy = tp.get('cx'), tp.get('cy')
-            el_href = (tp.get('href') or '').strip()
-            log(f"VPLink shadow link: {tp.get('tag')}@({cx},{cy}) "
-                f"{tp.get('w')}x{tp.get('h')} href={el_href[:100]}")
-
-            # Try CDP touch at exact position, with retry
-            for attempt in range(2):
-                try:
-                    driver.execute_cdp_cmd('Input.dispatchTouchEvent', {
-                        'type': 'touchStart',
-                        'touchPoints': [{'x': cx + (attempt * 5), 'y': cy + (attempt * 8), 'id': 1, 'radiusX': 20, 'radiusY': 20, 'force': 0.5}],
-                    })
-                    ms(100)
-                    driver.execute_cdp_cmd('Input.dispatchTouchEvent', {
-                        'type': 'touchEnd',
-                        'touchPoints': [],
-                    })
-                    ms(100)
-                    log(f"VPLink tap attempt {attempt+1}: dispatched at ({cx+(attempt*5)},{cy+(attempt*8)})")
-                except Exception as te:
-                    log(f"Tap attempt {attempt+1} failed ({te})")
-
-                ms(3000)
-                current = safe_url() or ''
-                if 'youtube' not in current:
-                    clicked = True
-                    log("VPLink tap: navigated away from YouTube!")
-                    break
+        if ei and ei.get('found'):
+            cx, cy, el_href = ei.get('cx'), ei.get('cy'), (ei.get('href') or '').strip()
+            log(f"VPLink <{ei.get('tag')}> @({cx},{cy}) href={el_href[:100]}")
+            # Quick CDP touch
+            try:
+                driver.execute_cdp_cmd('Input.dispatchTouchEvent', {
+                    'type': 'touchStart',
+                    'touchPoints': [{'x': cx, 'y': cy, 'id': 1, 'radiusX': 20, 'radiusY': 20, 'force': 0.5}],
+                })
+                ms(80)
+                driver.execute_cdp_cmd('Input.dispatchTouchEvent', {
+                    'type': 'touchEnd',
+                    'touchPoints': [],
+                })
+                log("VPLink CDP touch: dispatched")
+            except Exception as te:
+                log(f"CDP touch failed ({te})")
         else:
-            log("VPLink link not found in shadow DOM")
+            log("VPLink element not found in comment DOM")
 
         # Whether click dispatched or not, check if we navigated away from YouTube
         ms(3000)
