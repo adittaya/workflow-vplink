@@ -2813,82 +2813,92 @@ def navigate_youtube_for_vplink(video_url):
                 if (v && v.paused) { v.muted = true; v.play().catch(function(){}); }
             """)
 
-    # 5. Scroll to the comment section (lazy-loaded)
+    # 5. Scroll to the comment section and wait for comments to load
     safe_eval("""
         (function() {
-            var c = document.querySelector('#comments, ytd-comments, #comment-section, ytd-item-section-renderer');
+            var sel = '#comments, ytd-comments, ytm-comment-section-renderer, '
+                    + '#comment-section, ytd-item-section-renderer, '
+                    + 'ytd-comment-thread-renderer, ytm-comment-thread-renderer';
+            var c = document.querySelector(sel);
             if (c) { c.scrollIntoView({block: 'start', behavior: 'instant'}); return; }
-            window.scrollTo(0, document.documentElement.scrollHeight * 0.7);
+            window.scrollTo(0, document.documentElement.scrollHeight * 0.65);
         })();
     """)
-    human_delay(4000, 6000)
+    human_delay(3000, 5000)
 
-    # Click any "View comments" or expand buttons to trigger comment load
+    # Click any expand/load-more buttons to reveal comment section
     safe_eval("""
-        document.querySelectorAll('ytd-button-renderer a, '
-            + 'button[aria-label*="comment"], '
-            + '#comments-button, #show-more-comments, '
-            + 'ytd-continuation-item-renderer button')
-            .forEach(function(b) { b.click(); });
+        document.querySelectorAll(
+            'button[aria-label*="comment"], #comments-button, '
+            + '#show-more-comments, ytd-continuation-item-renderer button, '
+            + 'ytm-comment-section-renderer button, '
+            + 'ytd-button-renderer a, [aria-label*="Comments"], '
+            + '[aria-label*="View comments"]'
+        ).forEach(function(b) { b.click(); });
     """)
     human_delay(2000, 3000)
 
-    # Scroll deeper to trigger lazy-load of more comments
-    for _ in range(15):
-        safe_eval("window.scrollBy(0, 500);")
-        ms(300)
+    # Scroll incrementally, waiting for comment threads to appear
+    max_scrolls = 25
+    for _ in range(max_scrolls):
+        safe_eval("window.scrollBy(0, 400);")
+        ms(250)
+        has_comments = safe_eval("""
+            return document.querySelectorAll(
+                'ytd-comment-thread-renderer, ytm-comment-thread-renderer, '
+                + '#content-text, ytd-comment-renderer'
+            ).length > 0;
+        """)
+        if has_comments:
+            break
+
+    # If comments still not found, scroll more aggressively
+    if not has_comments:
+        for _ in range(15):
+            safe_eval("window.scrollBy(0, 600);")
+            ms(200)
 
     human_delay(3000, 4000)
 
     # 6. Locate a VPLink URL — try multiple strategies
     vplink_url = None
 
-    # Strategy A: direct a[href*="vplink.in"] in DOM
+    # Strategy A: all anchor tags containing vplink.in (direct or via redirect)
     vplink_url = safe_eval("""
         (function() {
-            var links = document.querySelectorAll('a[href*="vplink.in"]');
-            if (links.length > 0) return links[0].href;
+            var links = document.querySelectorAll('a[href*="vplink.in"], '
+                + 'a[href*="/redirect"]');
+            for (var i = 0; i < links.length; i++) {
+                var h = links[i].href;
+                if (h.indexOf('vplink.in') > -1) return h;
+                if (h.indexOf('/redirect') > -1) {
+                    try {
+                        var u = new URL(h);
+                        var q = u.searchParams.get('q');
+                        if (q && q.indexOf('vplink') > -1) return q;
+                    } catch(e) {}
+                }
+            }
             return null;
         })();
     """)
+    if vplink_url and vplink_url.startswith('http'):
+        pass  # already a URL
+    elif vplink_url:
+        # q param from redirect - decode it
+        from urllib.parse import unquote
+        vplink_url = unquote(vplink_url)
 
-    # Strategy B: YouTube /redirect links -> check q param for vplink
+    # Strategy B: scan full page HTML for vplink.in pattern
     if not vplink_url:
-        log("VPLink not found via direct selector, trying redirect links...")
-        redirect_url = safe_eval("""
-            (function() {
-                var links = document.querySelectorAll('a[href*="/redirect"]');
-                for (var i = 0; i < links.length; i++) {
-                    if (links[i].href.indexOf('vplink') > -1 ||
-                        decodeURIComponent(links[i].href).indexOf('vplink') > -1) {
-                        return links[i].href;
-                    }
-                }
-                return null;
-            })();
-        """)
-        if redirect_url:
-            from urllib.parse import urlparse, parse_qs, unquote
-            parsed = urlparse(redirect_url)
-            qs = parse_qs(parsed.query)
-            actual = qs.get('q', [None])[0]
-            if actual:
-                vplink_url = unquote(actual)
-
-    # Strategy C: scan page source for vplink.in pattern
-    if not vplink_url:
-        log("VPLink not found via redirect links, scanning page source...")
+        log("VPLink not found in anchors, scanning full page HTML...")
         vplink_url = safe_eval("""
             (function() {
-                var html = document.documentElement.innerHTML;
-                var re = /vplink\\.in\\/[a-zA-Z0-9]+/g;
-                var m = re.exec(html);
+                var html = document.documentElement.outerHTML;
+                var m = html.match(/https?\\:\\/\\/vplink\\.in\\/[a-zA-Z0-9]+/i);
+                if (m) return m[0];
+                m = html.match(/vplink\\.in\\/[a-zA-Z0-9]+/i);
                 if (m) return 'https://' + m[0];
-                // Also check innerText for bare URLs
-                var text = document.body.innerText;
-                var re2 = /https?\\:\\/\\/vplink\\.in\\/[a-zA-Z0-9]+/g;
-                var m2 = re2.exec(text);
-                if (m2) return m2[0];
                 return null;
             })();
         """)
