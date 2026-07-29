@@ -2759,159 +2759,96 @@ def debug_shot(label):
 def _find_vplink_element():
     """Find the clickable VPLink element in the DOM.
 
-    CDP recording shows the VPLink was clicked at:
-      ytd-expander a / #content-text > span > span[2] > a
-    Found via aria-label, text content, and pierce (shadow DOM).
+    CDP recording: VPLink clicked at ytd-expander a / #content-text > span > span[2] > a
+    Found via aria-label, text, pierce (shadow DOM).
 
-    Returns dict with {element_found, url, tag, text} or None.
-    Searches through shadow DOMs since YouTube uses shadow roots."""
-    return safe_eval("""
+    Returns dict with {element_found, url, tag, text}.
+    Uses page_source regex as primary (reliable), then tries to find element for click."""
+    source = ''
+    try:
+        source = driver.page_source
+    except Exception:
+        pass
+    if not source:
+        return json.dumps({'element_found': False, 'url': '', 'tag': '', 'text': ''})
+
+    url = ''
+    m = re.search(r'https?://vplink\.in/[a-zA-Z0-9]+', source)
+    if m:
+        url = m.group(0)
+    else:
+        m = re.search(r'vplink\.in/[a-zA-Z0-9]+', source)
+        if m:
+            url = 'https://' + m.group(0)
+
+    if not url:
+        return json.dumps({'element_found': False, 'url': '', 'tag': '', 'text': ''})
+
+    tag = ''
+    text = ''
+
+    el_info = safe_eval("""
+        var url = arguments[0];
         (function() {
             var base = window.location.origin;
-
-            // Recursively search shadow roots
-            function deepQuery(root, sel) {
-                var el = root.querySelector(sel);
-                if (el) return el;
-                var all = root.querySelectorAll('*');
-                for (var i = 0; i < all.length; i++) {
-                    if (all[i].shadowRoot) {
-                        el = deepQuery(all[i].shadowRoot, sel);
-                        if (el) return el;
-                    }
+            var links = document.querySelectorAll('a[href]');
+            for (var i = 0; i < links.length; i++) {
+                var h = links[i].href || '';
+                if (h.indexOf('vplink') > -1) {
+                    return JSON.stringify({found:true, tag:links[i].tagName,
+                        text:(links[i].textContent||'').trim().slice(0,100)});
                 }
-                return null;
-            }
-
-            // Check if element is inside a comment (has #content-text ancestor)
-            function inComment(el) {
-                while (el) {
-                    if (el.id === 'content-text'
-                        || el.tagName === 'YTD-COMMENT-THREAD-RENDERER'
-                        || el.tagName === 'YTM-COMMENT-THREAD-RENDERER'
-                        || el.tagName === 'YTD-COMMENT-RENDERER'
-                        || el.tagName === 'YTM-COMMENT-RENDERER')
-                        return true;
-                    el = el.parentElement || (el.getRootNode
-                        ? el.getRootNode().host || null : null);
-                }
-                return false;
-            }
-
-            var result = {element_found: false, url: '', tag: '', text: ''};
-
-            // A) Find anchor with redirect href containing vplink in q param
-            //    (YouTube wraps external comment links as /redirect?event=comments&q=...)
-            var candidates = [];
-            var links = deepQuery(document, 'a[href*="/redirect"]');
-            if (links) candidates.push(links);
-            // Also scan all a[href] via deepQuery
-            function collectAll(root) {
-                var all = root.querySelectorAll('a[href]');
-                for (var i = 0; i < all.length; i++) candidates.push(all[i]);
-                var els = root.querySelectorAll('*');
-                for (var i = 0; i < els.length; i++) {
-                    if (els[i].shadowRoot) collectAll(els[i].shadowRoot);
-                }
-            }
-            collectAll(document);
-
-            for (var i = 0; i < candidates.length; i++) {
-                var el = candidates[i];
-                try {
-                    var h = el.href || '';
-                    if (h.indexOf('/redirect') > -1) {
+                if (h.indexOf('/redirect') > -1) {
+                    try {
                         var u = new URL(h, base);
-                        var q = u.searchParams.get('q');
-                        if (q && q.indexOf('vplink') > -1) {
-                            result.element_found = true;
-                            result.url = q;
-                            result.tag = el.tagName;
-                            result.text = (el.textContent || '').trim();
-                            return JSON.stringify(result);
+                        var q = u.searchParams.get('q') || '';
+                        if (q.indexOf('vplink') > -1) {
+                            return JSON.stringify({found:true, tag:links[i].tagName,
+                                text:(links[i].textContent||'').trim().slice(0,100)});
                         }
-                    }
-                    if (h.indexOf('vplink.in') > -1) {
-                        result.element_found = true;
-                        result.url = h;
-                        result.tag = el.tagName;
-                        result.text = (el.textContent || '').trim();
-                        return JSON.stringify(result);
-                    }
-                } catch(e) {}
+                    } catch(e) {}
+                }
             }
-
-            // B) Text content search — the CDP recording used text/
-            function deepTextSearch(root) {
-                var all = root.querySelectorAll('*');
+            var byAria = document.querySelector('[aria-label*="vplink.in" i]');
+            if (byAria) {
+                return JSON.stringify({found:true, tag:byAria.tagName,
+                    text:(byAria.textContent||'').trim().slice(0,100)});
+            }
+            var containers = document.querySelectorAll(
+                '#content-text, ytd-comment-renderer, ytm-comment-renderer, '
+                + 'ytd-comment-thread-renderer, ytm-comment-thread-renderer, '
+                + '#comments, ytd-comments');
+            for (var c = 0; c < containers.length; c++) {
+                var all = containers[c].querySelectorAll('*');
                 for (var i = 0; i < all.length; i++) {
                     var t = all[i].textContent || '';
                     if (t.indexOf('vplink.in') > -1) {
-                        // Found text containing vplink. Now find the closest
-                        // clickable ancestor (a, button, etc.)
-                        var clickable = all[i].closest('a, button, [role="button"]');
-                        if (clickable) {
-                            result.element_found = true;
-                            result.url = clickable.href || clickable.textContent || '';
-                            result.tag = clickable.tagName;
-                            result.text = (clickable.textContent || '').trim();
-                            return true;
-                        }
-                        // Bare text node — check parent
-                        var p = all[i];
-                        if (p && p.offsetParent !== null) {
-                            result.element_found = true;
-                            result.url = t.match(/https?\\:\\/\\/vplink\\.in\\/[a-zA-Z0-9]+/);
-                            result.url = result.url ? result.url[0] : ('https://'
-                                + (t.match(/vplink\\.in\\/[a-zA-Z0-9]+/) || [''])[0]);
-                            result.tag = p.tagName;
-                            result.text = t.trim().slice(0, 100);
-                            return true;
-                        }
-                    }
-                    if (all[i].shadowRoot) {
-                        if (deepTextSearch(all[i].shadowRoot)) return true;
+                        var clickable = all[i].closest('a');
+                        if (!clickable) clickable = all[i];
+                        return JSON.stringify({found:true, tag:clickable.tagName,
+                            text:(clickable.textContent||'').trim().slice(0,100)});
                     }
                 }
-                return false;
             }
-            if (deepTextSearch(document)) return JSON.stringify(result);
-
-            // C) page outerHTML regex
-            var html = document.documentElement.outerHTML;
-            // Also include shadow DOM content
-            function collectShadowHTML(root, depth) {
-                if (depth > 5) return '';
-                var out = '';
-                var all = root.querySelectorAll('*');
-                for (var i = 0; i < all.length; i++) {
-                    if (all[i].shadowRoot) {
-                        out += all[i].shadowRoot.innerHTML;
-                        out += collectShadowHTML(all[i].shadowRoot, depth + 1);
-                    }
-                }
-                return out;
-            }
-            html += collectShadowHTML(document, 0);
-
-            var m = html.match(/https?\\:\\/\\/vplink\\.in\\/[a-zA-Z0-9]+/i);
-            if (m) {
-                result.element_found = false; // no element to click
-                result.url = m[0];
-                result.tag = 'regex';
-                return JSON.stringify(result);
-            }
-            m = html.match(/vplink\\.in\\/[a-zA-Z0-9]+/i);
-            if (m) {
-                result.element_found = false;
-                result.url = 'https://' + m[0];
-                result.tag = 'regex';
-                return JSON.stringify(result);
-            }
-
-            return JSON.stringify({element_found: false, url: '', tag: '', text: ''});
+            return JSON.stringify({found:false});
         })();
-    """)
+    """, url)
+
+    if el_info:
+        try:
+            ei = json.loads(el_info)
+            if ei.get('found'):
+                tag = ei.get('tag', '')
+                text = ei.get('text', '')
+        except Exception:
+            pass
+
+    return json.dumps({
+        'element_found': bool(tag),
+        'url': url,
+        'tag': tag,
+        'text': text,
+    })
 
 
 def navigate_youtube_for_vplink(video_url):
@@ -3083,16 +3020,53 @@ def navigate_youtube_for_vplink(video_url):
     vplink_url = vp.get('url', '')
     has_element = vp.get('element_found', False)
 
-    # ── CLICK the element if found (matching CDP behavior) ──
+    # ── CLICK the element if found (matching CDP behavior); else navigate directly ──
     clicked = False
-    if has_element and vplink_url:
-        log(f"Found VPLink element: {vp.get('tag','?')} url={vplink_url[:60]}")
+    if vplink_url:
+        log(f"VPLink found: {vplink_url[:80]} (element: {has_element})")
         ms(1000)
 
-        # Navigate to the URL? No — CLICK it like the CDP recording.
-        # But if we found via regex without element, use driver.get()
-        if not has_element:
-            log("No clickable element — navigating via driver.get()")
+        if has_element:
+            # Element was found in light DOM — click it (matches CDP behavior)
+            click_result = safe_eval("""
+                var url = arguments[0];
+                (function() {
+                    var base = window.location.origin;
+                    var sel = 'a[href*="vplink.in"], a[href*="/redirect"], '
+                        + '[aria-label*="vplink.in" i], a, [role="button"]';
+                    var el = document.querySelector(sel);
+                    if (!el) {
+                        var containers = document.querySelectorAll(
+                            '#content-text, ytd-comment-renderer, ytm-comment-renderer, '
+                            + 'ytd-comment-thread-renderer, ytm-comment-thread-renderer, '
+                            + '#comments, ytd-comments');
+                        for (var c = 0; c < containers.length; c++) {
+                            el = containers[c].querySelector(sel);
+                            if (el) break;
+                        }
+                    }
+                    if (el && el.offsetParent !== null) {
+                        el.scrollIntoView({block:'center'});
+                        el.click();
+                        el.dispatchEvent(new MouseEvent('click', {bubbles:true}));
+                        return 'clicked';
+                    }
+                    return 'not_visible';
+                })();
+            """, vplink_url)
+            log(f"VPLink click: {click_result}")
+            clicked = (click_result == 'clicked')
+
+        if not clicked:
+            # Click failed or no element — navigate directly
+            log("Navigating via driver.get()")
+            from urllib.parse import urlparse, parse_qs, unquote
+            parsed = urlparse(vplink_url)
+            if 'youtube' in (parsed.hostname or '') and 'redirect' in parsed.path:
+                qs = parse_qs(parsed.query)
+                actual = qs.get('q', [None])[0]
+                if actual:
+                    vplink_url = unquote(actual)
             try:
                 adpt_load.set_page_load(driver)
                 ns = time.time()
@@ -3100,124 +3074,10 @@ def navigate_youtube_for_vplink(video_url):
                 adpt_nav.observe(time.time() - ns)
                 clicked = True
             except Exception as e:
-                log(f"VPLink nav failed: {e} — JS fallback")
+                log(f"Nav failed: {e} — JS fallback")
                 safe_eval("location.href='" + vplink_url.replace("'", "\\'") + "';")
                 ms(3000)
                 clicked = True
-        else:
-            # Element was found. We need to CLICK it.
-            # The element is inside YouTube's comment section. It might be
-            # in a shadow DOM (ytd-expander pierce). Use deepQuery to find
-            # and click it.
-            click_result = safe_eval("""
-                (function() {
-                    var base = window.location.origin;
-                    function deepQuery(root, sel) {
-                        var el = root.querySelector(sel);
-                        if (el) return el;
-                        var all = root.querySelectorAll('*');
-                        for (var i = 0; i < all.length; i++) {
-                            if (all[i].shadowRoot) {
-                                el = deepQuery(all[i].shadowRoot, sel);
-                                if (el) return el;
-                            }
-                        }
-                        return null;
-                    }
-
-                    // Find the VPLink element. Try multiple approaches.
-                    var el = null;
-
-                    // Approach 1: anchor with /redirect and q=vplink
-                    el = deepQuery(document, 'a[href*="/redirect"]');
-                    if (el) {
-                        try {
-                            var u = new URL(el.href, base);
-                            var q = u.searchParams.get('q') || '';
-                            if (q.indexOf('vplink') > -1) {
-                                el.scrollIntoView({block:'center'});
-                                el.click();
-                                el.dispatchEvent(new MouseEvent('click', {bubbles:true}));
-                                return 'clicked_redirect_a';
-                            }
-                        } catch(e) {}
-                    }
-
-                    // Approach 2: any element with text matching vplink.in
-                    function findText(root) {
-                        var all = root.querySelectorAll('*');
-                        for (var i = 0; i < all.length; i++) {
-                            var t = all[i].textContent || '';
-                            if (t.indexOf('vplink.in') > -1) {
-                                var clickable = all[i].closest('a, button, '
-                                    + '[role="button"], [tabindex]');
-                                if (!clickable) clickable = all[i];
-                                if (clickable.offsetParent !== null) {
-                                    clickable.scrollIntoView({block:'center'});
-                                    clickable.click();
-                                    clickable.dispatchEvent(
-                                        new MouseEvent('click', {bubbles:true}));
-                                    return 'clicked_text_' + clickable.tagName;
-                                }
-                            }
-                            if (all[i].shadowRoot) {
-                                var r = findText(all[i].shadowRoot);
-                                if (r) return r;
-                            }
-                        }
-                        return null;
-                    }
-                    var r = findText(document);
-                    if (r) return r;
-
-                    // Approach 3: aria-label containing vplink.in
-                    el = deepQuery(document, '[aria-label*="vplink.in" i]');
-                    if (el) {
-                        el.scrollIntoView({block:'center'});
-                        el.click();
-                        el.dispatchEvent(new MouseEvent('click', {bubbles:true}));
-                        return 'clicked_aria';
-                    }
-
-                    return 'no_element_to_click';
-                })();
-            """)
-            log(f"VPLink click result: {click_result}")
-            clicked = (click_result and click_result.startswith('clicked_'))
-
-            if not clicked:
-                log("Click failed, trying driver.get() fallback")
-                try:
-                    adpt_load.set_page_load(driver)
-                    ns = time.time()
-                    driver.get(vplink_url)
-                    adpt_nav.observe(time.time() - ns)
-                    clicked = True
-                except Exception as e:
-                    log(f"Fallback nav failed: {e}")
-                    safe_eval("location.href='" + vplink_url.replace("'", "\\'") + "';")
-                    ms(3000)
-                    clicked = True
-
-    # ── Fallback: extract URL and navigate via driver.get() ──
-    if not clicked and vplink_url:
-        log(f"No element to click — navigating to: {vplink_url[:60]}")
-        from urllib.parse import urlparse, parse_qs, unquote
-        parsed = urlparse(vplink_url)
-        if 'youtube' in (parsed.hostname or '') and 'redirect' in parsed.path:
-            qs = parse_qs(parsed.query)
-            actual = qs.get('q', [None])[0]
-            if actual:
-                vplink_url = unquote(actual)
-        try:
-            adpt_load.set_page_load(driver)
-            ns = time.time()
-            driver.get(vplink_url)
-            adpt_nav.observe(time.time() - ns)
-        except Exception as e:
-            log(f"VPLink nav failed: {e}")
-            safe_eval("location.href='" + vplink_url.replace("'", "\\'") + "';")
-            ms(3000)
 
     # ── Wait for navigation and verify ──
     human_delay(3000, 5000)
