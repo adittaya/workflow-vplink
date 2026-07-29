@@ -19,3 +19,4 @@ __pycache__/
 manager/.venv/
 manager/manager.db
 template/
+*.info.json
