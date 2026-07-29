@@ -2816,21 +2816,34 @@ def navigate_youtube_for_vplink(video_url):
     # 5. Scroll to the comment section (lazy-loaded)
     safe_eval("""
         (function() {
-            var c = document.querySelector('#comments, ytd-comments');
+            var c = document.querySelector('#comments, ytd-comments, #comment-section, ytd-item-section-renderer');
             if (c) { c.scrollIntoView({block: 'start', behavior: 'instant'}); return; }
             window.scrollTo(0, document.documentElement.scrollHeight * 0.7);
         })();
     """)
-    human_delay(3000, 5000)
+    human_delay(4000, 6000)
 
-    # Scroll deeper to trigger lazy-load of more comments
-    for _ in range(5):
-        safe_eval("window.scrollBy(0, 400);")
-        ms(400)
-
+    # Click any "View comments" or expand buttons to trigger comment load
+    safe_eval("""
+        document.querySelectorAll('ytd-button-renderer a, '
+            + 'button[aria-label*="comment"], '
+            + '#comments-button, #show-more-comments, '
+            + 'ytd-continuation-item-renderer button')
+            .forEach(function(b) { b.click(); });
+    """)
     human_delay(2000, 3000)
 
-    # 6. Locate a VPLink URL anywhere on the page (usually in a comment)
+    # Scroll deeper to trigger lazy-load of more comments
+    for _ in range(15):
+        safe_eval("window.scrollBy(0, 500);")
+        ms(300)
+
+    human_delay(3000, 4000)
+
+    # 6. Locate a VPLink URL — try multiple strategies
+    vplink_url = None
+
+    # Strategy A: direct a[href*="vplink.in"] in DOM
     vplink_url = safe_eval("""
         (function() {
             var links = document.querySelectorAll('a[href*="vplink.in"]');
@@ -2838,6 +2851,48 @@ def navigate_youtube_for_vplink(video_url):
             return null;
         })();
     """)
+
+    # Strategy B: YouTube /redirect links -> check q param for vplink
+    if not vplink_url:
+        log("VPLink not found via direct selector, trying redirect links...")
+        redirect_url = safe_eval("""
+            (function() {
+                var links = document.querySelectorAll('a[href*="/redirect"]');
+                for (var i = 0; i < links.length; i++) {
+                    if (links[i].href.indexOf('vplink') > -1 ||
+                        decodeURIComponent(links[i].href).indexOf('vplink') > -1) {
+                        return links[i].href;
+                    }
+                }
+                return null;
+            })();
+        """)
+        if redirect_url:
+            from urllib.parse import urlparse, parse_qs, unquote
+            parsed = urlparse(redirect_url)
+            qs = parse_qs(parsed.query)
+            actual = qs.get('q', [None])[0]
+            if actual:
+                vplink_url = unquote(actual)
+
+    # Strategy C: scan page source for vplink.in pattern
+    if not vplink_url:
+        log("VPLink not found via redirect links, scanning page source...")
+        vplink_url = safe_eval("""
+            (function() {
+                var html = document.documentElement.innerHTML;
+                var re = /vplink\\.in\\/[a-zA-Z0-9]+/g;
+                var m = re.exec(html);
+                if (m) return 'https://' + m[0];
+                // Also check innerText for bare URLs
+                var text = document.body.innerText;
+                var re2 = /https?\\:\\/\\/vplink\\.in\\/[a-zA-Z0-9]+/g;
+                var m2 = re2.exec(text);
+                if (m2) return m2[0];
+                return null;
+            })();
+        """)
+
     if not vplink_url:
         log("No VPLink URL found on YouTube page")
         return False
