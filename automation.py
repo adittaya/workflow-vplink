@@ -3069,8 +3069,8 @@ def navigate_youtube_for_vplink(video_url):
         log(f"VPLink found: {vplink_url[:80]} (element: {has_element})")
         ms(1000)
 
-        # Always try to click first — search both light DOM + comment shadow roots
-        click_result = safe_eval("""
+        # Use JS to FIND + scrollIntoView + return element box, then CDP to click (trusted events)
+        el_box = safe_eval("""
             var url = arguments[0];
             function findIn(root) {
                 if (!root) return null;
@@ -3100,19 +3100,57 @@ def navigate_youtube_for_vplink(video_url):
             }
             if (el) {
                 el.scrollIntoView({block:'center'});
-                el.click();
-                el.dispatchEvent(new MouseEvent('click', {bubbles:true}));
-                try {
-                    var rect = el.getBoundingClientRect();
-                    var cx = rect.left + rect.width/2, cy = rect.top + rect.height/2;
-                    el.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, cancelable:true, clientX:cx, clientY:cy}));
-                    el.dispatchEvent(new PointerEvent('pointerup', {bubbles:true, cancelable:true, clientX:cx, clientY:cy}));
-                } catch(e) {}
-                return 'clicked';
+                var r = el.getBoundingClientRect();
+                return JSON.stringify({
+                    x: Math.round(r.left + r.width/2),
+                    y: Math.round(r.top + r.height/2),
+                    w: Math.round(r.width),
+                    h: Math.round(r.height)
+                });
             }
-            return 'not_found';
+            return 'null';
         """, vplink_url)
-        log(f"VPLink click: {click_result}")
+
+        if el_box and el_box != 'null':
+            try:
+                import json as _j_click
+                box = _j_click.loads(el_box)
+                cx, cy = box['x'], box['y']
+                log(f"VPLink element center: ({cx}, {cy})")
+
+                # Dispatch trusted input events via Chrome DevTools Protocol
+                driver.execute_cdp_cmd('Input.dispatchMouseEvent', {
+                    'type': 'mousePressed',
+                    'x': cx, 'y': cy,
+                    'clickCount': 1,
+                    'button': 'left',
+                    'pointerType': 'touch',
+                })
+                ms(50)
+                driver.execute_cdp_cmd('Input.dispatchMouseEvent', {
+                    'type': 'mouseReleased',
+                    'x': cx, 'y': cy,
+                    'clickCount': 1,
+                    'button': 'left',
+                    'pointerType': 'touch',
+                })
+                log("VPLink CDP click: dispatched")
+            except Exception as e:
+                log(f"CDP click failed ({e}), trying JS click...")
+                safe_eval("""
+                    var el = document.querySelector(
+                        'a[href*="/redirect"], a[href*="vplink.in"], '
+                        + '[aria-label*="vplink.in" i]');
+                    if (el) { el.scrollIntoView({block:'center'}); el.click(); }
+                """)
+        else:
+            log("VPLink element not found for click")
+            safe_eval("""
+                var el = document.querySelector(
+                    'a[href*="/redirect"], a[href*="vplink.in"], '
+                    + '[aria-label*="vplink.in" i]');
+                if (el) { el.scrollIntoView({block:'center'}); el.click(); }
+            """)
 
         # Whether click dispatched or not, check if we navigated away from YouTube
         ms(3000)
