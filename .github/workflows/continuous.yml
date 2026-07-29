@@ -13,6 +13,10 @@ on:
         description: 'YouTube video URL with VPLink in comments'
         required: false
         default: ''
+      no_relay:
+        description: 'Set to "1" to skip the relay (test mode)'
+        required: false
+        default: ''
   repository_dispatch:
     types: [relay]
 
@@ -163,7 +167,7 @@ jobs:
           fi
 
       - name: Relay — trigger next run
-        if: always()
+        if: always() && github.event.inputs.no_relay != '1'
         env:
           TRIGGER_TOKEN: ${{ secrets.LOOP_TRIGGER_TOKEN }}
         run: |
