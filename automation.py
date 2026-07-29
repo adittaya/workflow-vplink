@@ -3066,46 +3066,35 @@ def navigate_youtube_for_vplink(video_url):
     # ── FIND VPLink URL in shadow DOM and tap at exact text position ──
     # YouTube's yt-formatted-string parses URLs in comment text and wraps them
     # in <a> elements inside its shadow root. We tap at the <a>'s position.
+    # NOTE: Only search comment containers — not the full document (avoids slowdown)
     clicked = False
     el_href = ''
     if vplink_url:
-        vplink_short = vplink_url.replace('https://', '').replace('http://', '')
-        # Search yt-formatted-string shadow roots for the VPLink <a> element
         tap_coords = safe_eval("""
             var search = arguments[0];
-            var short = arguments[1];
-            // Check if element is clickable (visible, has pointer-events)
             function isClickable(el) {
                 if (!el || !el.offsetParent) return false;
                 var r = el.getBoundingClientRect();
-                if (r.width < 1 || r.height < 1) return false;
-                var style = window.getComputedStyle(el);
-                if (style.display === 'none' || style.visibility === 'hidden') return false;
-                if (style.pointerEvents === 'none') return false;
-                return true;
+                if (r.width < 2 || r.height < 2) return false;
+                var s = window.getComputedStyle(el);
+                return s.display !== 'none' && s.visibility !== 'hidden' && s.pointerEvents !== 'none';
             }
-            // Search inside a root (regular DOM or shadow root)
             function findLink(root) {
-                if (!root) return null;
-                // Direct <a> with href containing search domain
+                if (!root || !root.querySelectorAll) return null;
                 var links = root.querySelectorAll('a');
-                for (var i = 0; i < links.length; i++) {
+                for (var i = 0, lim = Math.min(links.length, 100); i < lim; i++) {
                     var h = links[i].href || '';
-                    if ((h.indexOf('vplink.in') > -1 || h.indexOf('/redirect?q=') > -1 && h.indexOf('vplink.in') > -1) && isClickable(links[i])) {
+                    if ((h.indexOf('vplink.in') > -1 || (h.indexOf('/redirect') > -1 && h.indexOf('vplink') > -1)) && isClickable(links[i])) {
                         return links[i];
                     }
                 }
-                // Text walker for any text containing vplink.in
                 var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
-                var node;
-                while (node = walker.nextNode()) {
+                var node, maxNodes = 500;
+                while ((node = walker.nextNode()) && maxNodes-- > 0) {
                     if (node.textContent.indexOf('vplink.in') > -1) {
-                        // Get the containing element that is clickable
                         var p = node.parentElement;
                         while (p && p !== root) {
-                            if (isClickable(p) && (p.tagName === 'A' || p.tagName === 'SPAN' || p.tagName === 'A')) {
-                                return p;
-                            }
+                            if (isClickable(p)) return p;
                             p = p.parentElement;
                         }
                         return node.parentElement;
@@ -3113,25 +3102,23 @@ def navigate_youtube_for_vplink(video_url):
                 }
                 return null;
             }
-            // Search main doc and all yt-formatted-string shadow roots
-            var el = findLink(document);
-            if (!el) {
-                var fss = document.querySelectorAll('yt-formatted-string');
-                for (var i = 0; i < fss.length; i++) {
-                    el = findLink(fss[i]);
-                    if (!el && fss[i].shadowRoot) el = findLink(fss[i].shadowRoot);
-                    if (el) break;
-                }
+            // Only search comment threads and yt-formatted-string within them
+            var containers = document.querySelectorAll(
+                'ytd-comment-view-model, ytm-comment-view-model, '
+                + 'ytd-comment-thread-renderer, ytm-comment-thread-renderer, '
+                + '#content-text, ytd-comments');
+            var el = null;
+            for (var i = 0; i < containers.length && !el; i++) {
+                el = findLink(containers[i]);
+                if (!el && containers[i].shadowRoot) el = findLink(containers[i].shadowRoot);
             }
+            // Also check yt-formatted-string that are INSIDE comment containers
             if (!el) {
-                // Fallback: search comment containers one more time
-                var containers = document.querySelectorAll(
-                    'ytd-comment-view-model, ytm-comment-view-model, '
-                    + '#content-text, #comments');
-                for (var i = 0; i < containers.length; i++) {
-                    el = findLink(containers[i]);
-                    if (!el && containers[i].shadowRoot) el = findLink(containers[i].shadowRoot);
-                    if (el) break;
+                var fss = document.querySelectorAll(
+                    'ytd-comment-view-model yt-formatted-string, '
+                    + 'ytm-comment-view-model yt-formatted-string');
+                for (var i = 0; i < Math.min(fss.length, 50) && !el; i++) {
+                    if (fss[i].shadowRoot) el = findLink(fss[i].shadowRoot);
                 }
             }
             if (el) {
@@ -3148,7 +3135,7 @@ def navigate_youtube_for_vplink(video_url):
                 });
             }
             return 'null';
-        """, vplink_url, vplink_short)
+        """, vplink_url)
 
         tp = None
         if tap_coords and tap_coords != 'null':
