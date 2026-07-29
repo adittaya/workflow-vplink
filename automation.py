@@ -2774,21 +2774,6 @@ def navigate_youtube_for_vplink(video_url):
             video_url = f"https://www.youtube.com/watch?v={vid}"
             log(f"Converted to full URL")
 
-    # 1. Switch to desktop viewport + desktop user-agent for YouTube.
-    #    Mobile YouTube hides comments in a carousel tab; desktop shows inline.
-    try:
-        driver.execute_cdp_cmd('Emulation.setDeviceMetricsOverride', {
-            'width': 1354, 'height': 848, 'deviceScaleFactor': 1,
-            'mobile': False
-        })
-        driver.execute_cdp_cmd('Network.setUserAgentOverride', {
-            'userAgent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 '
-                         '(KHTML, like Gecko) Chrome/150.0.7871.100 Safari/537.36'
-        })
-        log("Set desktop viewport + UA for YouTube")
-    except Exception as e:
-        log(f"Viewport/UA switch failed (non-fatal): {e}")
-
     # Navigate to the YouTube video
     try:
         adpt_load.set_page_load(driver)
@@ -2806,22 +2791,36 @@ def navigate_youtube_for_vplink(video_url):
         log("YouTube page empty — aborting YouTube nav")
         return False
 
-    # Wait for YouTube's JS framework to render (desktop: ytd- elements)
+    # Wait for YouTube's JS framework to render
     skeleton_ok = safe_eval("""
         return !!document.querySelector('ytd-app, ytm-app');
     """)
     log(f"YT skeleton present: {skeleton_ok}")
 
-    for _ in range(30):
-        rendered = safe_eval("""
-            return document.querySelector('ytd-watch-flexy, ytd-comments, '
-                + '#comments, ytd-comment-thread-renderer, '
-                + '#comment-section, #content-text') !== null;
-        """)
-        if rendered:
-            break
-        ms(1000)
-    log(f"YT comments rendered: {rendered}")
+    rendered = safe_eval("""
+        return !!document.querySelector(
+            'ytd-watch-flexy, ytd-comments, '
+            + '#comments, ytd-comment-thread-renderer, '
+            + 'ytm-comment-section-renderer, ytm-item-section-renderer, '
+            + '#comment-section, #content-text, '
+            + 'ytm-video-metadata-carousel'
+        );
+    """)
+    # On mobile (ytm-app), the carousel renders but comments are hidden.
+    # Wait up to 30s for JS to finish rendering.
+    if not rendered:
+        for _ in range(30):
+            rendered = safe_eval("""
+                return !!document.querySelector(
+                    'ytd-watch-flexy, ytd-comments, #comments, '
+                    + 'ytm-comment-section-renderer, ytm-item-section-renderer, '
+                    + 'ytm-video-metadata-carousel'
+                );
+            """)
+            if rendered:
+                break
+            ms(1000)
+    log(f"YT page rendered: {rendered}")
 
     human_delay(2000, 4000)
 
@@ -2839,9 +2838,55 @@ def navigate_youtube_for_vplink(video_url):
             .forEach(b => { try { b.click(); } catch(e) {} });
     """)
 
-    # 3. Scroll to comments section to trigger lazy-loading API call.
-    #    YouTube uses IntersectionObserver: comments load when scrolled into view.
-    #    We scroll into the actual comment section element first, then wait.
+    # 3. Determine if we're on mobile (ytm) or desktop (ytd) YouTube.
+    #    On mobile, comment threads are inside a collapsible carousel that
+    #    requires tapping "Show comments" to load via API.
+    #    On desktop, comments are rendered inline below the video.
+    is_mobile = safe_eval("return !!document.querySelector('ytm-app');")
+    log(f"Mobile YouTube: {is_mobile}")
+
+    # 4. EXPAND COMMENTS CAROUSEL (mobile only):
+    #    Find the "Comments" tab/header with rightChevronA11yText="Show comments"
+    #    and click it to trigger the API call that loads comment threads.
+    if is_mobile:
+        log("Expanding comment carousel on mobile YouTube...")
+        # Try multiple selectors for the comments tab/button
+        carousel_clicked = safe_eval("""
+            (function() {
+                var candidates = [];
+                // 1. aria-label "Show comments" — from rightChevronA11yText
+                candidates.push(
+                    document.querySelector('[aria-label*="comment" i]'));
+                // 2. Any button/link with text "Comments"
+                candidates.push.apply(candidates,
+                    [...document.querySelectorAll('button, a, [role="tab"], '
+                        + '[role="button"], div[tabindex]')]
+                        .filter(function(el) {
+                            var t = (el.textContent || '').trim();
+                            return t === 'Comments' || t.startsWith('Comments');
+                        }));
+                // 3. Inside ytm-video-metadata-carousel
+                var carousel = document.querySelector('ytm-video-metadata-carousel');
+                if (carousel) {
+                    candidates.push(
+                        carousel.querySelector('button, a, [role="tab"], '
+                            + '[role="button"], [tabindex]'));
+                }
+                // Click first valid candidate
+                for (var i = 0; i < candidates.length; i++) {
+                    var el = candidates[i];
+                    if (el && el.offsetParent !== null) {
+                        try { el.click(); return 'clicked:' + (el.tagName)
+                            + '|' + (el.getAttribute('aria-label')||''); }
+                        catch(e) { return 'error:' + e.message; }
+                    }
+                }
+                return 'no_candidate';
+            })();
+        """)
+        log(f"Carousel click: {carousel_clicked}")
+        ms(3000)
+
     vplink_url = None
 
     # Try immediate check (VPLink might be in initial data)
@@ -2959,15 +3004,6 @@ def navigate_youtube_for_vplink(video_url):
     if not url or 'youtube' in url:
         log("Still on YouTube after VPLink nav — YouTube nav failed")
         return False
-
-    # Restore mobile viewport for the funnel (article pages work better with mobile)
-    try:
-        driver.execute_cdp_cmd('Emulation.setDeviceMetricsOverride', {
-            'width': 390, 'height': 844, 'deviceScaleFactor': 1,
-            'mobile': True
-        })
-    except Exception:
-        pass
 
     log("YouTube nav: successfully entered VPLink funnel")
     return True
