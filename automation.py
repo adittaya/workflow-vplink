@@ -3063,150 +3063,82 @@ def navigate_youtube_for_vplink(video_url):
         except Exception:
             pass
 
-    # ── Expand collapsed comments (mobile YT truncates with "Read more") ──
-    safe_eval("""
-        function tap(el) {
-            if (!el) return;
-            el.scrollIntoView({block:'center'});
-            var r = el.getBoundingClientRect();
-            var cx = Math.round(r.left + r.width/2);
-            var cy = Math.round(r.top + r.height/2);
-            // Dispatch click chain
-            el.dispatchEvent(new MouseEvent('mousedown', {bubbles:true, cancelable:true, clientX:cx, clientY:cy}));
-            el.dispatchEvent(new MouseEvent('mouseup', {bubbles:true, cancelable:true, clientX:cx, clientY:cy}));
-            el.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, clientX:cx, clientY:cy}));
-            el.click();
-        }
-        var expanders = document.querySelectorAll(
-            'ytd-expander yt-formatted-string a, '
-            + 'ytm-expander yt-formatted-string a, '
-            + '#content-text ytd-expander a');
-        for (var i = 0; i < expanders.length; i++) {
-            var t = (expanders[i].textContent || '').trim().toLowerCase();
-            if (t === 'read more' || t === 'read' || t === 'more' || t.indexOf('read') === 0 || t.indexOf('more') === 0) {
-                tap(expanders[i]);
-            }
-        }
-        // Also find any expand/read button by aria-label or text
-        var all = document.querySelectorAll('[role="button"]');
-        for (var i = 0; i < all.length; i++) {
-            var t = (all[i].textContent || '').trim().toLowerCase();
-            if (all[i].offsetHeight > 0 && (t === 'read' || t === 'read more' || t === 'more' || t.indexOf('read') === 0 || t.indexOf('more') === 0)) {
-                tap(all[i]);
-            }
-        }
-    """)
-    ms(2000)
-
-    # Re-search for VPLink now that comments are expanded (actual link appears)
-    vplink_result2 = _find_vplink_element()
-    if vplink_result2 and vplink_result2 != 'null':
-        try:
-            import json as _j_vp2
-            vp2 = _j_vp2.loads(vplink_result2)
-            vp2_url = vp2.get('url', '')
-            if vp2_url and vp2_url != vplink_url:
-                log(f"VPLink URL updated after expand: {vp2_url}")
-                vplink_url = vp2_url
-                vp = vp2
-        except Exception:
-            pass
-
-    # ── FIND the actual VPLink anchor element (now expanded) ──
+    # ── FIND the exact VPLink URL text position and tap there ──
     clicked = False
     el_href = ''
     if vplink_url:
-        el_details = safe_eval("""
+        # Search for the VPLink URL text location (not element center)
+        # Mobile YT renders link as plain text inside BUTTON — need to hit the URL text
+        text_pos = safe_eval("""
             var url = arguments[0];
-            function findIn(root) {
-                if (!root) return null;
-                var sel = 'a[href*="/redirect"], a[href*="vplink.in"], '
-                    + '[aria-label*="vplink.in" i]';
-                var el = root.querySelector(sel);
-                if (el) return el;
-                var all = root.querySelectorAll('*');
-                for (var i = 0; i < all.length; i++) {
-                    var t = all[i].textContent || '';
-                    if (t.indexOf('vplink.in') > -1)
-                        return all[i].closest('a') || all[i];
+            function findTextNode(root, search) {
+                if (!root || root.nodeType === 3) return null;
+                var walker = document.createTreeWalker(
+                    root, NodeFilter.SHOW_ALL, null, false);
+                var node;
+                while (node = walker.nextNode()) {
+                    if (node.nodeType === 3 && node.textContent.indexOf(search) > -1) {
+                        return node;
+                    }
                 }
                 return null;
             }
-            var el = findIn(document);
-            if (!el) {
-                var containers = document.querySelectorAll(
-                    'ytd-comment-view-model, ytm-comment-view-model, '
-                    + '#content-text, #comments, ytd-comments');
-                for (var c = 0; c < containers.length; c++) {
-                    el = findIn(containers[c]);
-                    if (!el && containers[c].shadowRoot)
-                        el = findIn(containers[c].shadowRoot);
-                    if (el) break;
+            var containers = document.querySelectorAll(
+                'ytd-comment-view-model, ytm-comment-view-model, '
+                + '#content-text, #comments, ytd-comments, [role="button"]');
+            for (var c = 0; c < containers.length; c++) {
+                var tn = findTextNode(containers[c], 'vplink.in');
+                if (tn) {
+                    var range = document.createRange();
+                    var idx = tn.textContent.indexOf('https://vplink.in/');
+                    if (idx === -1) idx = tn.textContent.indexOf('vplink.in/');
+                    if (idx > -1) {
+                        range.setStart(tn, idx);
+                        range.setEnd(tn, idx + Math.min(30, tn.textContent.length - idx));
+                        var r = range.getBoundingClientRect();
+                        if (r && r.width > 0 && r.height > 0) {
+                            return JSON.stringify({
+                                cx: Math.round(r.left + r.width/2),
+                                cy: Math.round(r.top + r.height/2),
+                                w: Math.round(r.width),
+                                h: Math.round(r.height)
+                            });
+                        }
+                    }
                 }
-            }
-            if (el) {
-                var r = el.getBoundingClientRect();
-                var style = window.getComputedStyle(el);
-                return JSON.stringify({
-                    found: true,
-                    tag: el.tagName,
-                    cx: Math.round(r.left + r.width/2),
-                    cy: Math.round(r.top + r.height/2),
-                    w: Math.round(r.width),
-                    h: Math.round(r.height),
-                    pe: style.pointerEvents,
-                    href: (el.href || ''),
-                    text: (el.textContent||'').trim().slice(0,80)
-                });
             }
             return 'null';
         """, vplink_url)
 
-        el_data = None
-        if el_details and el_details != 'null':
+        tp_data = None
+        if text_pos and text_pos != 'null':
             try:
-                import json as _j_det
-                el_data = _j_det.loads(el_details)
+                import json as _j_tp
+                tp_data = _j_tp.loads(text_pos)
             except Exception:
                 pass
 
-        if el_data and el_data.get('found'):
-            cx, cy = el_data.get('cx'), el_data.get('cy')
-            el_href = (el_data.get('href') or '').strip()
-            log(f"VPLink el: {el_data.get('tag')}@({cx},{cy}) "
-                f"{el_data.get('w')}x{el_data.get('h')} "
-                f"pe={el_data.get('pe')} "
-                f"href={el_href[:120]}")
-            log(f"VPLink text: {el_data.get('text','')}")
+        if tp_data:
+            cx, cy = tp_data.get('cx'), tp_data.get('cy')
+            log(f"VPLink URL text at: ({cx},{cy}) size={tp_data.get('w')}x{tp_data.get('h')}")
 
-            # Try CDP dispatchTouchEvent with proper touchStart → touchEnd sequence
-            touch_ok = False
-            if cx and cy:
-                try:
-                    driver.execute_cdp_cmd('Input.dispatchTouchEvent', {
-                        'type': 'touchStart',
-                        'touchPoints': [{'x': cx, 'y': cy, 'id': 1, 'radiusX': 24, 'radiusY': 24, 'force': 0.5}],
-                    })
-                    ms(100)
-                    driver.execute_cdp_cmd('Input.dispatchTouchEvent', {
-                        'type': 'touchEnd',
-                        'touchPoints': [],
-                    })
-                    ms(50)
-                    touch_ok = True
-                    log("VPLink CDP touch: dispatched")
-                except Exception as te:
-                    log(f"CDP touch failed ({te})")
-            if not touch_ok:
-                try:
-                    driver.execute_cdp_cmd('Input.synthesizeTapGesture', {
-                        'x': cx, 'y': cy, 'duration': 100, 'tapCount': 1,
-                    })
-                    log("VPLink synthesizeTapGesture: dispatched")
-                except Exception as se:
-                    log(f"synthesizeTapGesture failed ({se})")
+            # CDP touch at EXACT URL text position
+            try:
+                driver.execute_cdp_cmd('Input.dispatchTouchEvent', {
+                    'type': 'touchStart',
+                    'touchPoints': [{'x': cx, 'y': cy, 'id': 1, 'radiusX': 16, 'radiusY': 16, 'force': 0.5}],
+                })
+                ms(80)
+                driver.execute_cdp_cmd('Input.dispatchTouchEvent', {
+                    'type': 'touchEnd',
+                    'touchPoints': [],
+                })
+                ms(50)
+                log("VPLink text-position tap: dispatched")
+            except Exception as te:
+                log(f"Text-position tap failed ({te})")
         else:
-            log("VPLink element not found in DOM")
+            log("VPLink URL text position not found")
 
         # Whether click dispatched or not, check if we navigated away from YouTube
         ms(3000)
