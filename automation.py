@@ -2851,6 +2851,37 @@ def _find_vplink_element():
     })
 
 
+def _extract_key_from_current_url():
+    global KEY, _current_key
+    if KEY:
+        return True
+    cur = safe_url()
+    if not cur:
+        return False
+    try:
+        from urllib.parse import urlparse, parse_qs
+        import re as _re
+        cp = urlparse(cur)
+        qs = parse_qs(cp.query)
+        for param_values in qs.values():
+            val = param_values[0]
+            if val and _re.match(r'^(?=.*[a-zA-Z])(?=.*[0-9])[a-zA-Z0-9]{4,8}$', val):
+                KEY = val
+                _current_key = val
+                log(f"KEY={KEY} (extracted from query param)")
+                return True
+        if not KEY:
+            m = _re.search(r'(?:vplink\.in|vlp\.in|linkpays\.in)/([a-zA-Z0-9]{3,10})', cur)
+            if m:
+                KEY = m.group(1)
+                _current_key = m.group(1)
+                log(f"KEY={KEY} (regex fallback from URL)")
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def navigate_youtube_for_vplink(video_url):
     """Navigate YouTube, FIND and CLICK the VPLink element in comments.
 
@@ -3059,6 +3090,12 @@ def navigate_youtube_for_vplink(video_url):
                 el.scrollIntoView({block:'center'});
                 el.click();
                 el.dispatchEvent(new MouseEvent('click', {bubbles:true}));
+                try {
+                    var rect = el.getBoundingClientRect();
+                    var cx = rect.left + rect.width/2, cy = rect.top + rect.height/2;
+                    el.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, cancelable:true, clientX:cx, clientY:cy}));
+                    el.dispatchEvent(new PointerEvent('pointerup', {bubbles:true, cancelable:true, clientX:cx, clientY:cy}));
+                } catch(e) {}
                 return 'clicked';
             }
             return 'not_found';
@@ -3106,7 +3143,8 @@ def navigate_youtube_for_vplink(video_url):
         return False
 
     # ── Extract KEY/BASE_DOMAIN from current URL ──
-    from urllib.parse import urlparse as _up
+    from urllib.parse import urlparse as _up, parse_qs as _pqs
+    import re as _re
     cp = _up(current_url)
     # Check if we're on a VPLink article page
     for domain_hint in ['vplink.in', 'linkpays.in', 'vlp.in']:
@@ -3119,9 +3157,40 @@ def navigate_youtube_for_vplink(video_url):
                 log(f"KEY={KEY} DOMAIN={BASE_DOMAIN} (from post-nav URL)")
             break
     else:
-        # Must have arrived at an article page — KEY is already set from the click
+        # Article page — extract KEY from query params or path
+        qs = _pqs(cp.query)
+        for param_values in qs.values():
+            val = param_values[0]
+            if val and _re.match(r'^(?=.*[a-zA-Z])(?=.*[0-9])[a-zA-Z0-9]{4,8}$', val):
+                KEY = val
+                _current_key = val
+                log(f"KEY={KEY} (from query param)")
+                break
         if not KEY:
-            KEY = _current_key or KEY
+            # Try last path segment as KEY (must contain both letter AND digit)
+            _KEY_WORD_BLOCK = frozenset([
+                'article', 'articles', 'page', 'pages', 'study', 'studies',
+                'post', 'posts', 'blog', 'category', 'tag', 'tags',
+                'home', 'index', 'default', 'login', 'logout', 'admin',
+            ])
+            segs = [s for s in cp.path.split('/') if s]
+            for seg in reversed(segs):
+                seg_clean = seg.split('?')[0].split('#')[0]
+                if (_re.match(r'^(?=.*[a-zA-Z])(?=.*[0-9])[a-zA-Z0-9]{4,8}$', seg_clean)
+                        and seg_clean.lower() not in _KEY_WORD_BLOCK):
+                    KEY = seg_clean
+                    _current_key = seg_clean
+                    log(f"KEY={KEY} (from path segment)")
+                    break
+        if not KEY:
+            # Fallback: scan entire URL for VPLink key pattern
+            m = _re.search(r'(?:vplink\.in|vlp\.in|linkpays\.in)/([a-zA-Z0-9]{3,10})', current_url)
+            if m:
+                KEY = m.group(1)
+                _current_key = m.group(1)
+                log(f"KEY={KEY} (regex fallback from URL)")
+            elif not KEY:
+                log("YouTube nav: could not extract KEY from post-YouTube URL")
 
     log("YouTube nav: entered VPLink funnel")
     return True
@@ -3193,6 +3262,11 @@ def main():
           skip_vplink_nav = navigate_youtube_for_vplink(youtube_url)
           if skip_vplink_nav:
               log("YouTube nav: entering main loop (skipping vplink.in navigation)")
+              _extract_key_from_current_url()
+              if not KEY:
+                  log("YouTube nav succeeded but KEY still empty — marking proxy blocked")
+                  proxy_blocked = True
+                  skip_main_loop = True
           else:
               log("YouTube nav failed, falling back to normal flow")
               if not KEY:
@@ -3419,6 +3493,8 @@ def main():
               break
           monitor.install(driver)
           monitor.poll()
+          if not KEY:
+              _extract_key_from_current_url()
           url = safe_url()
           if not url:
               ms(2000)
@@ -3839,47 +3915,52 @@ def main():
 
       if not destination_url and not proxy_blocked:
           log("running final fallback...")
-          got_dest = False
-          if "vplink.in" in safe_url():
-              got_dest = do_get_link()
-          if not got_dest:
-              vplink_href = safe_eval("""
-                  var links = document.querySelectorAll('a[href*="vplink.in"]');
-                  for (var i = 0; i < links.length; i++) {{
-                      if (links[i].href && links[i].href.indexOf('cdn-cgi') < 0) return links[i].href;
-                  }}
-                  return null;
-              """)
-              if vplink_href:
-                  log("found vplink link on page")
-                  try:
-                      adpt_load.set_page_load(driver)
-                      driver.get(vplink_href)
-                  except Exception:
-                      adpt_load.timeout_occured()
-                  human_delay(3000, 5000)
-                  if "vplink.in" in safe_url():
-                      got_dest = do_get_link()
-          if not got_dest:
-              for a in range(3):
-                  log(f"direct attempt {a + 1}")
-                  try:
-                      adpt_load.set_page_load(driver)
-                      driver.get(f"https://{BASE_DOMAIN}/{KEY}")
-                  except Exception:
-                      adpt_load.timeout_occured()
-                  for w in range(int(adpt_poll.get())):
-                      ms(500)
-                      cur = safe_url()
-                      if "vplink.in" in cur:
-                          has_gl = safe_eval("return !!document.getElementById('get-link');")
-                          if has_gl and do_get_link():
-                              got_dest = True
+          _extract_key_from_current_url()
+          if not KEY:
+              log("KEY empty in final fallback — marking proxy blocked")
+              proxy_blocked = True
+          if not proxy_blocked:
+              got_dest = False
+              if "vplink.in" in safe_url():
+                  got_dest = do_get_link()
+              if not got_dest:
+                  vplink_href = safe_eval("""
+                      var links = document.querySelectorAll('a[href*="vplink.in"]');
+                      for (var i = 0; i < links.length; i++) {{
+                          if (links[i].href && links[i].href.indexOf('cdn-cgi') < 0) return links[i].href;
+                      }}
+                      return null;
+                  """)
+                  if vplink_href:
+                      log("found vplink link on page")
+                      try:
+                          adpt_load.set_page_load(driver)
+                          driver.get(vplink_href)
+                      except Exception:
+                          adpt_load.timeout_occured()
+                      human_delay(3000, 5000)
+                      if "vplink.in" in safe_url():
+                          got_dest = do_get_link()
+              if not got_dest:
+                  for a in range(3):
+                      log(f"direct attempt {a + 1}")
+                      try:
+                          adpt_load.set_page_load(driver)
+                          driver.get(f"https://{BASE_DOMAIN}/{KEY}")
+                      except Exception:
+                          adpt_load.timeout_occured()
+                      for w in range(int(adpt_poll.get())):
+                          ms(500)
+                          cur = safe_url()
+                          if "vplink.in" in cur:
+                              has_gl = safe_eval("return !!document.getElementById('get-link');")
+                              if has_gl and do_get_link():
+                                  got_dest = True
+                                  break
+                          else:
                               break
-                      else:
+                      if got_dest:
                           break
-                  if got_dest:
-                      break
           if got_dest and not destination_url:
               destination_url = safe_url()
 

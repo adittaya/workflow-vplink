@@ -8,13 +8,14 @@
 ## Current State
 
 - **Last updated:** 2026-07-29
-- **Latest local commit:** `54b5cf7` fix: guard pages follow learn_more.php from raw HTML instead of force-navigating
-- **Previous commit:** `76775f2` fix: relay step always() to survive job timeout
-- **Local codebase status:** MODIFIED — YouTube nav system + KEY optional + TUI YouTube flow (unstaged)
+- **Latest local commit:** `b9984bb` fix: check navigation after click — fall through to driver.get() if click doesn't leave YouTube
+- **Previous commit:** `21fddbf` fix: search shadow roots of ytd-comment-view-model for VPLink element (targeted, no stack overflow)
+- **Local codebase status:** MODIFIED — YouTube nav KEY extraction + pointer events + empty KEY guard (unstaged)
 - **Accounts:** main (@adittaya), second (@rtff5665)
 - **CI status:** 4 consecutive successful runs, 1 in-progress. Relay working 24/7.
 - **24/7 relay root cause:** FIXED — relay step condition changed from `if: success() || failure()` to `if: always()`. Job timeout produces `conclusion=cancelled` which `success()||failure()` doesn't cover.
 - **Guard page root cause:** FIXED — when `learn_more.php` redirects to page with no VPLink elements, automation now checks raw HTML for next `learn_more.php` link and follows it instead of force-navigating back to vplink.in.
+- **YouTube nav root cause:** FIXED — VPLink URL was in `yt-attributed-string` shadow DOM. Targeted traversal of `ytd-comment-view-model.shadowRoot` ($`a[href*="/redirect"]` with `q=vplink`) finds the element. Click dispatched but mobile YT doesn't navigate away → `driver.get()` fallback.
 
 ---
 
@@ -22,7 +23,7 @@
 
 | File | Lines | Status | Purpose |
 |------|-------|--------|---------|
-| `automation.py` | 3678 | MODIFIED | VPLink automation engine — YouTube nav, 4 template handlers, PageMonitor, flow logic |
+| `automation.py` | ~3993 | MODIFIED | VPLink automation engine — YouTube nav, KEY extraction, 4 template handlers, PageMonitor, flow logic |
 | `tui.py` | ~1182 | MODIFIED | Interactive Python TUI — deploy/dispatch/settings updated for YouTube URL flow |
 | `proxy_rotator.py` | ~300 | OK | Proxy rotation with Supabase pagination, blacklist, used tracking |
 | `continuous.yml` | ~221 | MODIFIED | CI workflow — YouTube URL input, optional key, relay payload |
@@ -46,40 +47,43 @@
 
 ---
 
-## YouTube Navigation System (`navigate_youtube_for_vplink`, line 2755)
+## YouTube Navigation System (`navigate_youtube_for_vplink`, line 2811)
 
-**Purpose:** Watch a YouTube video for 60s, extract VPLink URL from comments, click it, enter funnel.
+**Purpose:** Navigate YouTube mobile, expand comment carousel, find VPLink element in shadow DOM, CLICK it, fall back to `driver.get()` if click doesn't navigate away.
 
-**Flow:**
-1. `driver.get(video_url)` — navigate to YouTube video
-2. `wait_for_page_ready(h=200, 20s)` — ensure page loaded
-3. Dismiss sign-in overlays (`Close`, `Dismiss`, `No thanks` buttons)
-4. Mute video + click play + call `video.play()`
-5. Watch 60s loop: `ms(1000)` × 60, resume playback every 10s if paused
-6. Scroll `#comments` into view (lazy-loaded) + 5 more deep scrolls (400px each)
-7. `querySelectorAll('a[href*="vplink.in"]')` — find VPLink URL
-8. Extract real URL from YouTube redirect wrapper (`q` query param from `/redirect?event=comments&...`)
-9. `driver.get(vplink_url)` — navigate to VPLink directly
-10. Verify `'youtube' not in safe_url()` — confirm we left YouTube
+**CI-verified flow (commit b9984bb, run30446047114):**
+1. `driver.get(video_url)` → detect ytm-app (mobile YouTube)
+2. Expand comment carousel (tap `[aria-label*="comment"]` or carousel tab)
+3. Scroll `#comments` / `ytd-comments` / `ytm-comment-section-renderer` into view
+4. Wait 25s for `#content-text` / comment renderers to appear
+5. `_find_vplink_element()` — **Python `page_source` regex** (reliable) + **targeted shadow DOM search**:
+   - `page_source` regex: `https?://vplink\.in/[a-zA-Z0-9]+` (always works — Chrome serializes shadow DOMs into outerHTML)
+   - JS: `querySelectorAll('ytd-comment-view-model, ytm-comment-view-model')` → check each container's light DOM + `.shadowRoot` for `a[href*="/redirect"]` with `q` param containing `vplink`
+   - Returns `{element_found, url, tag, text}` as JSON
+6. **CLICK** the found element (JS `el.click() + MouseEvent('click')`, scrollIntoView first)
+7. Check if navigated away from YouTube (wait 3s, check `safe_url()`)
+8. If still on YouTube → **`driver.get(vplink_url)`** fallback (extracts real URL from YouTube redirect `q` param)
+9. Extract KEY/BASE_DOMAIN from current URL after navigation
 
-**Integration in `main()` (line 2930):**
+**Shadow DOM handling (2-key insight):**
+- YouTube uses Shady DOM (Polyfill, content in light DOM) for most elements, but `yt-attributed-string` uses native Shadow DOM for the link text
+- `document.querySelectorAll('a[href]')` misses shadow DOM content
+- **Targeted traversal**: only check `ytd-comment-view-model` / `ytm-comment-view-model` containers + their `.shadowRoot` — avoids stack overflow from full-page recursion
+
+**Integration in `main()` (line 3160):**
 - Env var: `VPLINK_YOUTUBE_URL` (full YouTube video URL)
 - Checked at start of each proxy attempt, BEFORE referer/vplink.in navigation
-- On success → `skip_vplink_nav=True` → skips vplink.in navigation + auto-redirect wait → enters main loop directly
+- On success → `skip_vplink_nav=True` → skips vplink.in navigation
 - On failure → falls through to normal flow (referer + vplink.in + redirect)
 
-**Key behaviors:**
-- Extracts `q` parameter from YouTube redirect URL to bypass YouTube's redirect wall (avoids sign-in requirement)
-- Falls back to `location.href` assignment if `driver.get()` fails
-- Returns False on any failure so caller can fall back to normal flow
-- Fully backward compatible — no change when `VPLINK_YOUTUBE_URL` is unset
-
-**CDP test result (2026-07-29, KEY=UIx1EO via YT comment):**
-- Video played 0s → 70.5s over 60s watch period (success)
-- Comment section loaded: 3 threads, 6 comments
-- VPLink found: `https://www.youtube.com/redirect?...&q=https%3A%2F%2Fvplink.in%2FUIx1EO`
-- Clicked → new tab opened at `vplink.in/UIx1EO` → auto-redirected to `techcornernews.com` article page
-- Article page: standard WordPress (Study in Canada), no VPLink template elements (guard page)
+**CI outcomes:**
+| Commit | Result | Details |
+|--------|--------|---------|
+| `ee75acc` | Crash | `name 're' is not defined` — `_find_vplink_element` used `re.search()` without import |
+| `c21de5c` | ✅ Success, destination captured | `import re` fix. `element_found: false` (light DOM only) → `driver.get()` fallback worked |
+| `21fddbf` | ✅ Element found + clicked, but stayed on YT | `element_found: true` via shadow DOM search, `VPLink click: clicked` but mobile YT click doesn't navigate away |
+| `b9984bb` | ✅ Success | Click → still on YT → fallback → funnel entered ✅
+| *(current)* | Fixes | KEY extraction from deep funnel URL query params + pointer events on click + empty KEY guard in main loop + final fallback empty KEY → proxy_blocked instead of blank vplink.in/
 
 ---
 
@@ -120,12 +124,20 @@ Recording: `/home/ubuntu/Documents/Recording 7_24_2026 at 11_21_29 PM.json` (KEY
 - **User wants: KEY optional — only YouTube URL needed, no VPLink key required ✅ DONE (2026-07-29)**
 - **User wants: TUI updated for YouTube URL flow — deploy/dispatch/settings/sync ✅ DONE (2026-07-29)**
 - **User wants: VPLINK_KEY removed entirely from TUI — YouTube-only deploy ✅ DONE (2026-07-29)**
+- **User wants: click the VPLink element (not just extract URL) — shadow DOM traversal finds element, click dispatched, fallback to driver.get() when YT doesn't navigate ✅ DONE (2026-07-29, commit b9984bb)**
+- **User wants (from CI run #1829 postmortem): KEY extraction from deep funnel URL query params + pointer events for click + empty KEY guard to prevent blank vplink.in/ death spiral ✅ DONE (2026-07-29)**
 
 ---
 
 ## TODO List (All Items)
 
 ### High Priority — All Complete
+- [x] Android Chrome trace analysis (UIx1EO, video 8A2LHzyevJA, 393×873 @2.75x DPR)
+- [x] KEY extraction from deep funnel URL query params (studyinsurances=, key=, etc.)
+- [x] Pointer events (pointerdown/pointerup) added to click mechanism for mobile YT
+- [x] _extract_key_from_current_url() helper + empty KEY guard in main loop
+- [x] Final fallback empty KEY → proxy_blocked instead of navigating to blank vplink.in/
+- [x] Proxy Pool Pagination
 - [x] Proxy Pool Pagination
 - [x] do_get_link() Fast Path + Full Rewrite
 - [x] Cross-Account Dispatch + Secrets
@@ -207,3 +219,10 @@ Recording: `/home/ubuntu/Documents/Recording 7_24_2026 at 11_21_29 PM.json` (KEY
 
 ### Phase 18: TUI YouTube-Only Flow — VPLINK_KEY Removed (2026-07-29)
 207-213. **tui.py** — `deploy_new()`: removed `key` param, removed `VPLINK_KEY` from secrets dict, removed `key` from dispatch inputs and deployment record. `screen_deploy()`: YouTube URL only, no VPLINK_KEY prompt. `screen_dispatch()`: YouTube URL only, no KEY input. `screen_settings()`: removed VPLINK_KEY display and option (YouTube URL is [4], Clear is [5]). `normalize_key()` removed as dead code.
+
+### Phase 19: VPLink Element CLICK — Shadow DOM + Navigation Fallback (2026-07-29)
+214-220. **automation.py** — 4 commits to fix the VPLink element click behavior in YouTube comments:
+   - `ee75acc`: Python `page_source` regex for URL extraction (avoids JS stack overflow from full-DOM shadow root recursion)
+   - `c21de5c`: Added `import re` (fix: `name 're' is not defined` crash)
+   - `21fddbf`: Targeted shadow DOM traversal — only checks `ytd-comment-view-model` + `.shadowRoot` for `a[href*="/redirect"]` with `q=vplink`. Returns `element_found: true` ✅ CI-verified.
+   - `b9984bb`: After dispatching click, check if navigation left YouTube. Mobile YT click doesn't navigate away → `driver.get()` fallback. CI-verified. ✅
