@@ -31,7 +31,7 @@ env:
   VPLINK_HEADLESS: '1'
   VPLINK_NONINTERACTIVE: '1'
   VPLINK_KEY: ${{ github.event.inputs.key || github.event.client_payload.key || '' }}
-  VPLINK_YOUTUBE_URL: ${{ secrets.VPLINK_YOUTUBE_URL || github.event.inputs.youtube_url || github.event.client_payload.youtube_url || '' }}
+  VPLINK_YOUTUBE_URL: ${{ github.event.inputs.youtube_url || github.event.client_payload.youtube_url || secrets.VPLINK_YOUTUBE_URL || '' }}
   RELAY_TARGET_REPO: ${{ secrets.RELAY_TARGET_REPO || github.repository }}
 
 jobs:
@@ -175,12 +175,13 @@ jobs:
             echo "::warning::RELAY_TARGET_REPO not set and github.repository empty — relay cannot fire"
             exit 0
           fi
-
-          if [ -n "$VPLINK_YOUTUBE_URL" ]; then
-            PAYLOAD='{"event_type":"relay","client_payload":{"youtube_url":"'"$VPLINK_YOUTUBE_URL"'"}}'
-          else
-            PAYLOAD='{"event_type":"relay","client_payload":{"key":"'"$VPLINK_KEY"'"}}'
+          if [ -z "$VPLINK_KEY" ] && [ -z "$VPLINK_YOUTUBE_URL" ]; then
+            echo "::warning::Both KEY and YOUTUBE_URL empty — relay would fire with empty payload, skipping"
+            exit 0
           fi
+
+          # Always pass both key and youtube_url so relay chain preserves both values
+          PAYLOAD='{"event_type":"relay","client_payload":{"key":"'"${VPLINK_KEY}"'","youtube_url":"'"${VPLINK_YOUTUBE_URL}"'"}}'
 
           # Try LOOP_TRIGGER_TOKEN first, then fall back to GITHUB_TOKEN
           for TOKEN_VAR in TRIGGER_TOKEN GITHUB_TOKEN; do
