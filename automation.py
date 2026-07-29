@@ -3063,12 +3063,59 @@ def navigate_youtube_for_vplink(video_url):
         except Exception:
             pass
 
-    # ── FIND the element, get its real href, and try to click ──
+    # ── Expand collapsed comments (mobile YT truncates with "Read more") ──
+    safe_eval("""
+        function tap(el) {
+            if (!el) return;
+            el.scrollIntoView({block:'center'});
+            var r = el.getBoundingClientRect();
+            var cx = Math.round(r.left + r.width/2);
+            var cy = Math.round(r.top + r.height/2);
+            // Dispatch click chain
+            el.dispatchEvent(new MouseEvent('mousedown', {bubbles:true, cancelable:true, clientX:cx, clientY:cy}));
+            el.dispatchEvent(new MouseEvent('mouseup', {bubbles:true, cancelable:true, clientX:cx, clientY:cy}));
+            el.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, clientX:cx, clientY:cy}));
+            el.click();
+        }
+        var expanders = document.querySelectorAll(
+            'ytd-expander yt-formatted-string a, '
+            + 'ytm-expander yt-formatted-string a, '
+            + '#content-text ytd-expander a');
+        for (var i = 0; i < expanders.length; i++) {
+            var t = (expanders[i].textContent || '').trim().toLowerCase();
+            if (t === 'read more' || t === 'read' || t === 'more' || t.indexOf('read') === 0 || t.indexOf('more') === 0) {
+                tap(expanders[i]);
+            }
+        }
+        // Also find any expand/read button by aria-label or text
+        var all = document.querySelectorAll('[role="button"]');
+        for (var i = 0; i < all.length; i++) {
+            var t = (all[i].textContent || '').trim().toLowerCase();
+            if (all[i].offsetHeight > 0 && (t === 'read' || t === 'read more' || t === 'more' || t.indexOf('read') === 0 || t.indexOf('more') === 0)) {
+                tap(all[i]);
+            }
+        }
+    """)
+    ms(2000)
+
+    # Re-search for VPLink now that comments are expanded (actual link appears)
+    vplink_result2 = _find_vplink_element()
+    if vplink_result2 and vplink_result2 != 'null':
+        try:
+            import json as _j_vp2
+            vp2 = _j_vp2.loads(vplink_result2)
+            vp2_url = vp2.get('url', '')
+            if vp2_url and vp2_url != vplink_url:
+                log(f"VPLink URL updated after expand: {vp2_url}")
+                vplink_url = vp2_url
+                vp = vp2
+        except Exception:
+            pass
+
+    # ── FIND the actual VPLink anchor element (now expanded) ──
     clicked = False
     el_href = ''
     if vplink_url:
-        ms(1000)
-
         el_details = safe_eval("""
             var url = arguments[0];
             function findIn(root) {
