@@ -3064,7 +3064,15 @@ def navigate_youtube_for_vplink(video_url):
             return 'not_found';
         """, vplink_url)
         log(f"VPLink click: {click_result}")
-        clicked = (click_result == 'clicked')
+
+        # Whether click dispatched or not, check if we navigated away from YouTube
+        ms(3000)
+        current = safe_url() or ''
+        if 'youtube' in current:
+            log("Click didn't navigate away — using fallback")
+            click_result = 'stayed_on_yt'
+        else:
+            clicked = True
 
         if not clicked:
             # Click failed or no element — navigate directly
