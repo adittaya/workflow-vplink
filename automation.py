@@ -2760,11 +2760,13 @@ def debug_shot(label):
 def _find_vplink_element():
     """Find the clickable VPLink element in the DOM.
 
-    CDP recording: VPLink clicked at ytd-expander a / #content-text > span > span[2] > a
-    Found via aria-label, text, pierce (shadow DOM).
+    CDP recording (Jul 29, desktop 1354×848):
+    - VPLink clicked at ytd-expander a / #content-text > span > span[2] > a
+    - Desktop YT: link in light DOM (no shadow root needed)
+    - Selectors: ytd-expander a, #content-text span span[2] a, aria/https://vplink.in/...
 
     Returns dict with {element_found, url, tag, text}.
-    Uses page_source regex as primary (reliable), then tries to find element for click."""
+    """
     source = ''
     try:
         source = driver.page_source
@@ -2818,7 +2820,7 @@ def _find_vplink_element():
             }
             return null;
         }
-        var sel = 'ytd-comment-view-model, ytm-comment-view-model, '
+        var sel = 'ytd-expander a, ytd-comment-view-model, ytm-comment-view-model, '
             + 'ytd-comment-thread-renderer, ytm-comment-thread-renderer, '
             + '#content-text, ytd-comments, #comments';
         var containers = document.querySelectorAll(sel);
@@ -2883,16 +2885,15 @@ def _extract_key_from_current_url():
 
 
 def navigate_youtube_for_vplink(video_url):
-    """Navigate YouTube, FIND and CLICK the VPLink element in comments.
+    """Navigate YouTube (desktop), FIND and CLICK the VPLink element in comments.
 
-    CDP recording analysis (Jul 29, 1354x848 desktop):
-    - Step 2: nav to YouTube video
-    - Step 3: click Pause (optional)
-    - Step 4: CLICK the VPLink URL from first comment — NOT extract + navigate
-    - The VPLink was clicked at `ytd-expander a` / `#content-text > span > span[2] > a`
-    - Selectors: aria/https://vplink.in/UIx1EO, text/https://vplink.in/UIx1EO
-    - YouTube handles the redirect through its JS when you CLICK the link
-    - On mobile: comments are behind a carousel tab — need to tap first
+    CDP recording (Jul 29, 1354×848 desktop, key=UIx1EO):
+    - Step 2: nav to YouTube video (www.youtube.com — NOT mobile)
+    - Step 3: click Pause via `div.ytp-left-controls > button`
+    - Step 4: CLICK the VPLink comment link via `ytd-expander a`
+    - Desktop YT: VPLink href is directly `https://vplink.in/KEY` (light DOM)
+    - Desktop YT click works directly — no /redirect wrapper, no shadow DOM needed
+    - After click: directly enters VPLink funnel (vplink.in/KEY)
 
     Returns True if we left YouTube for the VPLink funnel."""
     global KEY, BASE_DOMAIN, _current_key
@@ -2936,7 +2937,7 @@ def navigate_youtube_for_vplink(video_url):
 
     human_delay(2000, 4000)
 
-    # Dismiss overlays
+    # ── Dismiss overlays ──
     safe_eval("""
         [...document.querySelectorAll('button')]
             .filter(b => /close|dismiss|no thanks|skip|got it|reject/i
@@ -2947,31 +2948,26 @@ def navigate_youtube_for_vplink(video_url):
             .forEach(b => { try { b.click(); } catch(e) {} });
     """)
 
+    # ── Pause the video (CDP recording: click pause first) ──
+    pause_btn = safe_eval("""
+        var pb = document.querySelector('div.ytp-left-controls > button');
+        if (pb && pb.offsetParent !== null) { pb.click(); return 'paused'; }
+        var alt = document.querySelector('.ytp-play-button');
+        if (alt && alt.offsetParent !== null) { alt.click(); return 'alt_paused'; }
+        return 'no_pause';
+    """)
+    log(f"Video pause: {pause_btn}")
+    ms(1000)
+
     # ── Mobile (ytm): expand comment carousel ──
     is_mobile = (app_tag == 'ytm')
     if is_mobile:
         log("Mobile YouTube — expanding comment carousel")
         safe_eval("""
             (function() {
-                var tap = null;
-                tap = document.querySelector(
-                    '[aria-label*="comment" i], '
-                    + '[aria-label*="show comment" i]');
+                var tap = document.querySelector('[aria-label*="comment" i]');
                 if (!tap) {
-                    var c = document.querySelector('ytm-video-metadata-carousel');
-                    if (c) {
-                        var all = c.querySelectorAll('*');
-                        for (var i = 0; i < all.length; i++) {
-                            if (/^Comments\\b/.test(all[i].textContent.trim())
-                                && all[i].offsetParent !== null) {
-                                tap = all[i]; break;
-                            }
-                        }
-                    }
-                }
-                if (!tap) {
-                    var btns = document.querySelectorAll('button, [role="tab"], '
-                        + '[role="button"]');
+                    var btns = document.querySelectorAll('button, [role="tab"], [role="button"]');
                     for (var i = 0; i < btns.length; i++) {
                         if (/^Comments\\b/.test(btns[i].textContent.trim())
                             && btns[i].offsetParent !== null) {
@@ -2981,21 +2977,18 @@ def navigate_youtube_for_vplink(video_url):
                 }
                 if (!tap) {
                     var c = document.querySelector('ytm-video-metadata-carousel');
-                    if (c && c.firstElementChild
-                        && c.firstElementChild.offsetParent !== null)
+                    if (c && c.firstElementChild && c.firstElementChild.offsetParent !== null)
                         tap = c.firstElementChild;
                 }
                 if (tap) {
                     tap.click();
                     tap.dispatchEvent(new MouseEvent('click', {bubbles: true}));
-                    return tap.tagName + '|' + (tap.textContent||'').trim().slice(0,20);
                 }
-                return 'no_tap';
             })();
         """)
         ms(3000)
 
-    # ── Scroll to comments and wait for threads to load ──
+    # ── Scroll to comments ──
     log("Scrolling to comments...")
     safe_eval("""
         (function() {
@@ -3011,12 +3004,13 @@ def navigate_youtube_for_vplink(video_url):
     """)
     ms(3000)
 
+    # ── Wait for comment threads to load ──
+    has_threads = None
     for w in range(25):
         has_threads = safe_eval("""
-            return document.querySelectorAll(
-                '#content-text, ytd-comment-renderer, ytm-comment-renderer, '
-                + 'ytd-comment-thread-renderer, ytm-comment-thread-renderer'
-            ).length > 0;
+            return document.querySelectorAll('#content-text, ytd-comment-renderer, '
+                + 'ytm-comment-renderer, ytd-comment-thread-renderer, '
+                + 'ytm-comment-thread-renderer').length > 0;
         """)
         if has_threads:
             log(f"Comments loaded at {w+1}s")
@@ -3033,9 +3027,7 @@ def navigate_youtube_for_vplink(video_url):
                 ms(2000)
                 break
 
-    # ── FIND and CLICK the VPLink element ──
-    # The CDP recording shows the link was CLICKED, not extracted + navigated.
-    # YouTube's JS handles the redirect when you click.
+    # ── FIND VPLink URL via page_source regex ──
     vplink_result = _find_vplink_element()
     log(f"VPLink search: {vplink_result[:150] if vplink_result else 'None'}")
 
@@ -3049,10 +3041,14 @@ def navigate_youtube_for_vplink(video_url):
         vp = {}
 
     vplink_url = vp.get('url', '')
-    has_element = vp.get('element_found', False)
+    if not vplink_url:
+        log("No VPLink URL found in page")
+        return False
 
-    # Extract KEY from VPLink URL immediately (before navigation consumes it)
-    if vplink_url and 'vplink.in' in vplink_url and 'youtube.com' not in vplink_url:
+    log(f"VPLink URL: {vplink_url[:80]}")
+
+    # Extract KEY from VPLink URL
+    if 'vplink.in' in vplink_url and 'youtube.com' not in vplink_url:
         try:
             from urllib.parse import urlparse as _vp_up
             _vp_key = _vp_up(vplink_url).path.lstrip('/').split('?')[0].split('#')[0]
@@ -3063,108 +3059,161 @@ def navigate_youtube_for_vplink(video_url):
         except Exception:
             pass
 
-    # ── FIND and tap the VPLink element ──
+    # ── CLICK the VPLink element ──
     clicked = False
     el_href = ''
-    if vplink_url:
-        # Quick search for the VPLink <a> element (comment containers only, no full DOM crawl)
-        el_info = safe_eval("""
-            var url = arguments[0];
-            var containers = document.querySelectorAll(
-                'ytd-comment-view-model, ytm-comment-view-model, #content-text');
-            for (var c = 0; c < containers.length; c++) {
-                var root = containers[c].shadowRoot || containers[c];
-                // Look for <a> with vplink href first
-                var links = root.querySelectorAll('a');
-                for (var i = 0; i < links.length; i++) {
-                    var h = links[i].href || '';
-                    if (h.indexOf('vplink.in') > -1 || (h.indexOf('/redirect') > -1 && h.indexOf('vplink') > -1)) {
-                        links[i].scrollIntoView({block:'center'});
-                        var r = links[i].getBoundingClientRect();
-                        return JSON.stringify({
-                            found: true, tag: links[i].tagName,
-                            cx: Math.round(r.left + r.width/2), cy: Math.round(r.top + r.height/2),
-                            href: (links[i].href || '').slice(0,200)
-                        });
-                    }
+
+    el_info = safe_eval("""
+        var url = arguments[0];
+        var qa = function(root, fn) {
+            if (!root) return null;
+            var all = root.querySelectorAll('a');
+            for (var i = 0; i < all.length; i++) {
+                var h = all[i].href || '';
+                if (h.indexOf('vplink.in') > -1 || h.indexOf(url) > -1) {
+                    return fn(all[i]);
+                }
+                if (h.indexOf('/redirect') > -1 && h.indexOf('vplink') > -1) {
+                    return fn(all[i]);
                 }
             }
-            return 'null';
-        """, vplink_url)
+            var txt = root.querySelectorAll('*');
+            for (var i = 0; i < txt.length; i++) {
+                var t = txt[i].textContent || '';
+                if (t.indexOf('vplink.in') > -1) {
+                    var cl = txt[i].closest('a');
+                    if (cl) return fn(cl);
+                    return fn(txt[i]);
+                }
+            }
+            return null;
+        };
+        var found = null;
+        // Desktop YT: ytd-expander a is the primary selector
+        var expanders = document.querySelectorAll('ytd-expander a');
+        for (var i = 0; i < expanders.length; i++) {
+            var h = expanders[i].href || '';
+            if (h.indexOf('vplink.in') > -1 || h.indexOf(url) > -1) {
+                found = expanders[i]; break;
+            }
+        }
+        if (!found) {
+            // Broader desktop search
+            var containers = document.querySelectorAll(
+                'ytd-comment-view-model, ytm-comment-view-model, #content-text, '
+                + 'ytd-comment-thread-renderer');
+            for (var c = 0; c < containers.length; c++) {
+                found = qa(containers[c], function(el) { return el; });
+                if (!found && containers[c].shadowRoot)
+                    found = qa(containers[c].shadowRoot, function(el) { return el; });
+                if (found) break;
+            }
+        }
+        if (!found) {
+            // Full page text search
+            var all = document.querySelectorAll('a');
+            for (var i = 0; i < all.length; i++) {
+                var h = all[i].href || '';
+                if (h.indexOf('vplink.in') > -1 || h.indexOf(url) > -1) {
+                    found = all[i]; break;
+                }
+            }
+        }
+        if (found) {
+            found.scrollIntoView({block:'center', behavior:'instant'});
+            var r = found.getBoundingClientRect();
+            return JSON.stringify({
+                found: true, tag: found.tagName,
+                cx: Math.round(r.left + r.width/2),
+                cy: Math.round(r.top + r.height/2),
+                href: (found.href || '').slice(0,200),
+                text: (found.textContent || '').trim().slice(0,80)
+            });
+        }
+        return JSON.stringify({found: false});
+    """, vplink_url)
 
-        ei = None
-        if el_info and el_info != 'null':
-            try:
-                import json as _j_ei
-                ei = _j_ei.loads(el_info)
-            except Exception:
-                pass
+    ei = None
+    if el_info and el_info != 'null':
+        try:
+            import json as _j_ei
+            ei = _j_ei.loads(el_info)
+        except Exception:
+            pass
 
-        if ei and ei.get('found'):
-            cx, cy, el_href = ei.get('cx'), ei.get('cy'), (ei.get('href') or '').strip()
-            log(f"VPLink <{ei.get('tag')}> @({cx},{cy}) href={el_href[:100]}")
-            # Quick CDP touch
-            try:
-                driver.execute_cdp_cmd('Input.dispatchTouchEvent', {
-                    'type': 'touchStart',
-                    'touchPoints': [{'x': cx, 'y': cy, 'id': 1, 'radiusX': 20, 'radiusY': 20, 'force': 0.5}],
-                })
-                ms(80)
-                driver.execute_cdp_cmd('Input.dispatchTouchEvent', {
-                    'type': 'touchEnd',
-                    'touchPoints': [],
-                })
-                log("VPLink CDP touch: dispatched")
-            except Exception as te:
-                log(f"CDP touch failed ({te})")
-        else:
-            log("VPLink element not found in comment DOM")
+    if ei and ei.get('found'):
+        cx, cy, el_href = ei.get('cx'), ei.get('cy'), (ei.get('href') or '').strip()
+        log(f"VPLink <{ei.get('tag')}> @({cx},{cy}) text={ei.get('text','')[:40]}")
 
-        # Whether click dispatched or not, check if we navigated away from YouTube
-        ms(3000)
-        current = safe_url() or ''
-        if 'youtube' in current:
-            log("Click didn't navigate away — using fallback")
-            click_result = 'stayed_on_yt'
-        else:
-            clicked = True
-
-        if not clicked:
-            # Click failed — navigate using YouTube redirect URL (traffic attribution)
-            if el_href:
-                nav_url = el_href
+        # CLICK via Selenium execute_script (works on desktop YT — light DOM)
+        try:
+            el_obj = safe_eval("""
+                var url = arguments[0];
+                var el = document.querySelector('ytd-expander a[href*="vplink"]');
+                if (!el) {
+                    var all = document.querySelectorAll('a[href*="vplink"]');
+                    if (all.length > 0) el = all[0];
+                }
+                if (!el) {
+                    var all2 = document.querySelectorAll('a[href*="' + url.replace('https://','') + '"]');
+                    if (all2.length > 0) el = all2[0];
+                }
+                return el;
+            """, vplink_url)
+            if el_obj:
+                driver.execute_script("arguments[0].click();", el_obj)
+                log("VPLink clicked via Selenium")
+                ms(2000)
             else:
-                from urllib.parse import quote as _q
-                yt_base = (safe_eval("return location.origin + '/';") or 'https://www.youtube.com/').rstrip('/')
-                nav_url = yt_base + '/redirect?q=' + _q(vplink_url, safe='') + '&event=comments'
-            log(f"Navigating via YouTube redirect URL: {nav_url[:150]}")
-            from urllib.parse import urlparse, parse_qs, unquote
-            try:
-                adpt_load.set_page_load(driver)
-                ns = time.time()
-                driver.get(nav_url)
-                adpt_nav.observe(time.time() - ns)
-                clicked = True
-            except Exception as e:
-                log(f"Nav failed: {e} — JS fallback")
-                safe_eval("location.href='" + nav_url.replace("'", "\\'") + "';")
-                ms(3000)
-                clicked = True
+                # CDP mouse click via coordinates
+                driver.execute_cdp_cmd('Input.dispatchMouseEvent', {
+                    'type': 'mousePressed',
+                    'x': cx, 'y': cy, 'button': 'left', 'clickCount': 1
+                })
+                ms(100)
+                driver.execute_cdp_cmd('Input.dispatchMouseEvent', {
+                    'type': 'mouseReleased',
+                    'x': cx, 'y': cy, 'button': 'left', 'clickCount': 1
+                })
+                log("VPLink clicked via CDP mouse")
+                ms(2000)
+        except Exception as ce:
+            log(f"Click failed ({ce})")
+    else:
+        log("VPLink element not found for click")
+        el_href = vplink_url
 
-    # ── Wait for navigation and verify ──
+    # ── Check if navigation left YouTube ──
+    current = safe_url() or ''
+    if 'youtube' in current:
+        log("Click didn't navigate away — using driver.get() fallback")
+        nav_url = el_href or vplink_url
+        log(f"Navigating via driver.get() to: {nav_url[:120]}")
+        try:
+            adpt_load.set_page_load(driver)
+            ns = time.time()
+            driver.get(nav_url)
+            adpt_nav.observe(time.time() - ns)
+        except Exception as e:
+            log(f"Fallback nav failed: {e} — JS location.href")
+            safe_eval("location.href='" + nav_url.replace("'", "\\'") + "';")
+            ms(3000)
+    else:
+        log("Click navigated away from YouTube")
+        clicked = True
+
+    # ── Wait and verify ──
     human_delay(3000, 5000)
-
     current_url = safe_url()
     log(f"Post-YouTube URL: {(current_url or '')[:100]}")
     if not current_url or 'youtube' in current_url:
-        log("Still on YouTube after nav")
+        log("Still on YouTube after all navigation attempts")
         return False
 
     # ── Extract KEY/BASE_DOMAIN from current URL ──
     from urllib.parse import urlparse as _up, parse_qs as _pqs
     import re as _re
     cp = _up(current_url)
-    # Check if we're on a VPLink article page
     for domain_hint in ['vplink.in', 'linkpays.in', 'vlp.in']:
         if domain_hint in current_url:
             BASE_DOMAIN = cp.hostname or BASE_DOMAIN
@@ -3175,7 +3224,6 @@ def navigate_youtube_for_vplink(video_url):
                 log(f"KEY={KEY} DOMAIN={BASE_DOMAIN} (from post-nav URL)")
             break
     else:
-        # Article page — extract KEY from query params or path
         qs = _pqs(cp.query)
         for param_values in qs.values():
             val = param_values[0]
@@ -3185,7 +3233,6 @@ def navigate_youtube_for_vplink(video_url):
                 log(f"KEY={KEY} (from query param)")
                 break
         if not KEY:
-            # Try last path segment as KEY (must contain both letter AND digit)
             _KEY_WORD_BLOCK = frozenset([
                 'article', 'articles', 'page', 'pages', 'study', 'studies',
                 'post', 'posts', 'blog', 'category', 'tag', 'tags',
@@ -3201,7 +3248,6 @@ def navigate_youtube_for_vplink(video_url):
                     log(f"KEY={KEY} (from path segment)")
                     break
         if not KEY:
-            # Fallback: scan entire URL for VPLink key pattern
             m = _re.search(r'(?:vplink\.in|vlp\.in|linkpays\.in)/([a-zA-Z0-9]{3,10})', current_url)
             if m:
                 KEY = m.group(1)
@@ -3291,6 +3337,11 @@ def main():
                   log("WARNING: KEY is empty and YouTube nav failed — fallback will not work")
                   proxy_blocked = True
                   skip_main_loop = True
+
+      # ── Set referrer to exact YouTube URL (YouTube nav mode) ──
+      if skip_vplink_nav and youtube_url:
+          TRAFFIC_REFERRERS[TRAFFIC_SOURCE] = youtube_url
+          _inject_traffic_source()
 
       # ── Traffic source referrer (only if YouTube nav didn't already navigate) ──
       if not skip_vplink_nav:

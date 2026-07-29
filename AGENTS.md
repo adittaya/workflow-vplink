@@ -7,10 +7,10 @@
 
 ## Current State
 
-- **Last updated:** 2026-07-29
+- **Last updated:** 2026-07-30
 - **Latest local commit:** `b9984bb` fix: check navigation after click — fall through to driver.get() if click doesn't leave YouTube
 - **Previous commit:** `21fddbf` fix: search shadow roots of ytd-comment-view-model for VPLink element (targeted, no stack overflow)
-- **Local codebase status:** MODIFIED — YouTube nav KEY extraction + pointer events + empty KEY guard (unstaged)
+- **Local codebase status:** MODIFIED — YouTube desktop-first rewrite + CDP recording UIx1EO analysis + ytd-expander a selector (unstaged)
 - **Accounts:** main (@adittaya), second (@rtff5665)
 - **CI status:** 4 consecutive successful runs, 1 in-progress. Relay working 24/7.
 - **24/7 relay root cause:** FIXED — relay step condition changed from `if: success() || failure()` to `if: always()`. Job timeout produces `conclusion=cancelled` which `success()||failure()` doesn't cover.
@@ -49,26 +49,26 @@
 
 ## YouTube Navigation System (`navigate_youtube_for_vplink`, line 2811)
 
-**Purpose:** Navigate YouTube mobile, expand comment carousel, find VPLink element in shadow DOM, CLICK it, fall back to `driver.get()` if click doesn't navigate away.
+**Purpose:** Navigate YouTube (desktop preferred), find VPLink element in comments (light DOM), CLICK it, fall back to `driver.get()` if click doesn't navigate away.
 
-**CI-verified flow (commit b9984bb, run30446047114):**
-1. `driver.get(video_url)` → detect ytm-app (mobile YouTube)
-2. Expand comment carousel (tap `[aria-label*="comment"]` or carousel tab)
-3. Scroll `#comments` / `ytd-comments` / `ytm-comment-section-renderer` into view
-4. Wait 25s for `#content-text` / comment renderers to appear
-5. `_find_vplink_element()` — **Python `page_source` regex** (reliable) + **targeted shadow DOM search**:
-   - `page_source` regex: `https?://vplink\.in/[a-zA-Z0-9]+` (always works — Chrome serializes shadow DOMs into outerHTML)
-   - JS: `querySelectorAll('ytd-comment-view-model, ytm-comment-view-model')` → check each container's light DOM + `.shadowRoot` for `a[href*="/redirect"]` with `q` param containing `vplink`
+**CDP-verified flow (Recording 7/29, 1354×848 desktop, key=UIx1EO):**
+1. `driver.get(video_url)` → detect ytd-app (desktop YouTube, `www.youtube.com`)
+2. **Click Pause** (`div.ytp-left-controls > button`) — pause video before interacting with comments
+3. Scroll `#comments` / `ytd-comments` into view
+4. Wait for `#content-text` / `ytd-comment-view-model` to appear
+5. `_find_vplink_element()` — **Python `page_source` regex** + **targeted `ytd-expander a` search**:
+   - Desktop YouTube: VPLink `<a>` is in **light DOM** with `href="https://vplink.in/KEY"` — no shadow root or `/redirect` wrapper
+   - Primary selector: `ytd-expander a[href*="vplink"]`
+   - Falls back to `ytd-comment-view-model` / `#content-text` container search
    - Returns `{element_found, url, tag, text}` as JSON
-6. **CLICK** the found element (JS `el.click() + MouseEvent('click')`, scrollIntoView first)
+6. **CLICK** via Selenium `execute_script("arguments[0].click()")` — desktop YT click navigates directly to VPLink
 7. Check if navigated away from YouTube (wait 3s, check `safe_url()`)
-8. If still on YouTube → **`driver.get(vplink_url)`** fallback (extracts real URL from YouTube redirect `q` param)
+8. If still on YouTube → **`driver.get(vplink_url)`** fallback
 9. Extract KEY/BASE_DOMAIN from current URL after navigation
 
-**Shadow DOM handling (2-key insight):**
-- YouTube uses Shady DOM (Polyfill, content in light DOM) for most elements, but `yt-attributed-string` uses native Shadow DOM for the link text
-- `document.querySelectorAll('a[href]')` misses shadow DOM content
-- **Targeted traversal**: only check `ytd-comment-view-model` / `ytm-comment-view-model` containers + their `.shadowRoot` — avoids stack overflow from full-page recursion
+**Desktop vs Mobile YouTube differences:**
+- Desktop (`www.youtube.com`): VPLink in light DOM via `ytd-expander a` — click works directly
+- Mobile (`m.youtube.com`): VPLink in shadow DOM of `ytm-comment-view-model` with `/redirect?q=` wrapper — click needs CDP fallback
 
 **Integration in `main()` (line 3160):**
 - Env var: `VPLINK_YOUTUBE_URL` (full YouTube video URL)
@@ -83,7 +83,7 @@
 | `c21de5c` | ✅ Success, destination captured | `import re` fix. `element_found: false` (light DOM only) → `driver.get()` fallback worked |
 | `21fddbf` | ✅ Element found + clicked, but stayed on YT | `element_found: true` via shadow DOM search, `VPLink click: clicked` but mobile YT click doesn't navigate away |
 | `b9984bb` | ✅ Success | Click → still on YT → fallback → funnel entered ✅
-| *(current)* | Fixes | KEY extraction from deep funnel URL query params + pointer events on click + empty KEY guard in main loop + final fallback empty KEY → proxy_blocked instead of blank vplink.in/
+| *(current)* | MODIFIED | Desktop YouTube-first rewrite: `ytd-expander a` selector, pause video, CDP-recorded click flow. No more `m.youtube.com` forced mobile. |
 
 ---
 
@@ -198,6 +198,39 @@ Recording: `/home/ubuntu/Documents/Recording 7_24_2026 at 11_21_29 PM.json` (KEY
 
 ---
 
+---
+
+## CDP Recording Analysis (Jul 29, 1354×848 Desktop YouTube, KEY=UIx1EO)
+
+**File:** `Recording 7_29_2026 at 4_34_34 PM.json`
+**Total steps:** 1697
+
+**Flow:**
+1. DuckDuckGo new tab → `https://www.youtube.com/watch?si=7M0Ha9xmAwWVz1SF&v=8A2LHzyevJA&feature=youtu.be`
+2. Click Pause (`div.ytp-left-controls > button`) — desktop YT player
+3. Click VPLink comment link (`ytd-expander a`, `#content-text > span > span[2] > a`) → `vplink.in/UIx1EO`
+4. Article 1: `techcornernews.com/studyeducates/study-in-canada-for-international-students-2026/` (TP)
+   - Click X (`#block-cont-1 > div:nth-of-type(1)`), Click CONTINUE (`#continueBtn`)
+   - PageDown ×20 → Click CONTINUE (`#tp-snp2`) → `learn_more.php`
+5. Article 2: `srtak.com/universitiesstudy/top-10-high-dividend-paying-stocks-in-india-2026/` (CE)
+   - Click X, Click CONTINUE, ad dismiss (safeframe), PageDown ×28
+   - Click CONTINUE (`#tp-snp2`) → `learn_more.php`
+6. Article 3: `srtak.com/universitiesstudy/compare-post-study-work-visa-rules-uk-vs-usa-2026/` (LINK1S)
+   - ArrowDown ×18, ArrowUp ×6, Click Verify (`#btn6`), PageDown ×21
+   - Click Continue (`#btn7 button`) → next article
+7. Article 4: `srtak.com/universitiesstudy/top-5-commercial-auto-insurance-providers-uk-2026/` (getlink)
+   - Click X, Click "click to verify" (`#startCountdownBtn`), PageDown ×17
+   - Click Continue (`#cross-snp2`) → `learn_more.php`
+8. Destination: `vplink.in/UIx1EO` → ArrowDown ×5 → Click Get Link (`#get-link`)
+9. Final: `https://wistfulseverely.com/api/users?token=...`
+
+**Key findings:**
+- Desktop YouTube (`www.youtube.com`, NOT mobile) — VPLink comment link is in **light DOM**
+- Primary selector: `ytd-expander a` — direct `<a>` tag with href=`https://vplink.in/KEY`
+- No shadow DOM traversal needed on desktop YT
+- Desktop click works directly (no `/redirect` wrapper issue)
+- Pause video first before interacting with comments
+
 ## What Has Been Done (All Sessions — Chronological)
 
 ### Phase 1: Initial Setup & Analysis
@@ -226,3 +259,12 @@ Recording: `/home/ubuntu/Documents/Recording 7_24_2026 at 11_21_29 PM.json` (KEY
    - `c21de5c`: Added `import re` (fix: `name 're' is not defined` crash)
    - `21fddbf`: Targeted shadow DOM traversal — only checks `ytd-comment-view-model` + `.shadowRoot` for `a[href*="/redirect"]` with `q=vplink`. Returns `element_found: true` ✅ CI-verified.
    - `b9984bb`: After dispatching click, check if navigation left YouTube. Mobile YT click doesn't navigate away → `driver.get()` fallback. CI-verified. ✅
+
+### Phase 20: Desktop YouTube-First Rewrite (2026-07-30)
+221-225. **automation.py** — Desktop YouTube-first rewrite based on CDP recording (KEY=UIx1EO, 1354×848):
+   - `_find_vplink_element()`: Added `ytd-expander a` selector as primary desktop YT selector
+   - `navigate_youtube_for_vplink()`: Desktop-first flow — pause video via `div.ytp-left-controls > button`, scroll `#comments`, target `ytd-expander a` light DOM link (no shadow DOM), click via Selenium `execute_script`, fallback `driver.get()` if still on YT
+   - Desktop YT VPLink href is `https://vplink.in/KEY` directly (no `/redirect?q=` wrapper)
+   - Desktop YT click navigates directly (no mobile-style `/redirect` interception)
+   - Mobile (ytm) carousel expansion kept as fallback for m.youtube.com
+226. **AGENTS.md** — Updated Current State, CI table, YouTube nav section, CDP analysis section, Phase 20 entry
