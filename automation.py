@@ -3130,9 +3130,14 @@ def navigate_youtube_for_vplink(video_url):
             clicked = True
 
         if not clicked:
-            # Click failed — navigate using element's actual href (YouTube redirect URL)
-            nav_url = el_href or vplink_url
-            log(f"Navigating via driver.get() to: {nav_url[:120]}")
+            # Click failed — navigate using YouTube redirect URL (traffic attribution)
+            if el_href:
+                nav_url = el_href
+            else:
+                from urllib.parse import quote as _q
+                yt_base = (safe_eval("return location.origin + '/';") or 'https://www.youtube.com/').rstrip('/')
+                nav_url = yt_base + '/redirect?q=' + _q(vplink_url, safe='') + '&event=comments'
+            log(f"Navigating via YouTube redirect URL: {nav_url[:150]}")
             from urllib.parse import urlparse, parse_qs, unquote
             try:
                 adpt_load.set_page_load(driver)
