@@ -3118,23 +3118,38 @@ def navigate_youtube_for_vplink(video_url):
                 cx, cy = box['x'], box['y']
                 log(f"VPLink element center: ({cx}, {cy})")
 
-                # Dispatch trusted input events via Chrome DevTools Protocol
-                driver.execute_cdp_cmd('Input.dispatchMouseEvent', {
-                    'type': 'mousePressed',
-                    'x': cx, 'y': cy,
-                    'clickCount': 1,
-                    'button': 'left',
-                    'pointerType': 'touch',
-                })
-                ms(50)
-                driver.execute_cdp_cmd('Input.dispatchMouseEvent', {
-                    'type': 'mouseReleased',
-                    'x': cx, 'y': cy,
-                    'clickCount': 1,
-                    'button': 'left',
-                    'pointerType': 'touch',
-                })
-                log("VPLink CDP click: dispatched")
+                # Dispatch trusted tap gesture via Chrome DevTools Protocol
+                # Mobile YouTube uses touch event listeners; CDP synthesizeTapGesture
+                # generates the full touchStart→touchEnd lifecycle with correct timing
+                tap_ok = False
+                try:
+                    driver.execute_cdp_cmd('Input.synthesizeTapGesture', {
+                        'x': cx, 'y': cy,
+                        'duration': 80,
+                        'tapCount': 1,
+                        'gestureSourceType': 'touch',
+                    })
+                    tap_ok = True
+                    log("VPLink CDP tap: dispatched (synthesizeTapGesture)")
+                except Exception as tap_e:
+                    log(f"synthesizeTapGesture failed ({tap_e}), trying dispatchTouchEvent...")
+                if not tap_ok:
+                    try:
+                        driver.execute_cdp_cmd('Input.dispatchTouchEvent', {
+                            'type': 'touchStart',
+                            'touchPoints': [{'x': cx, 'y': cy, 'id': 1, 'radiusX': 20, 'radiusY': 20}],
+                            'modifiers': 0,
+                        })
+                        ms(80)
+                        # TouchEnd must NOT contain touchPoints per CDP spec
+                        driver.execute_cdp_cmd('Input.dispatchTouchEvent', {
+                            'type': 'touchEnd',
+                            'touchPoints': [],
+                            'modifiers': 0,
+                        })
+                        log("VPLink CDP tap: dispatched (dispatchTouchEvent)")
+                    except Exception as te:
+                        log(f"dispatchTouchEvent also failed ({te})")
             except Exception as e:
                 log(f"CDP click failed ({e}), trying JS click...")
                 safe_eval("""
