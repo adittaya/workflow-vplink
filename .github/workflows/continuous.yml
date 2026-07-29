@@ -21,7 +21,7 @@ on:
     types: [relay]
 
 concurrency:
-  group: vplink-${{ github.repository }}
+  group: vplink-${{ github.repository }}${{ github.event.inputs.no_relay && '-test' || '' }}
   cancel-in-progress: false
 
 env:
