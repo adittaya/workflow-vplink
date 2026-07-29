@@ -3051,6 +3051,18 @@ def navigate_youtube_for_vplink(video_url):
     vplink_url = vp.get('url', '')
     has_element = vp.get('element_found', False)
 
+    # Extract KEY from VPLink URL immediately (before navigation consumes it)
+    if vplink_url and 'vplink.in' in vplink_url and 'youtube.com' not in vplink_url:
+        try:
+            from urllib.parse import urlparse as _vp_up
+            _vp_key = _vp_up(vplink_url).path.lstrip('/').split('?')[0].split('#')[0]
+            if _vp_key and re.match(r'^[a-zA-Z0-9]{3,10}$', _vp_key):
+                KEY = _vp_key
+                _current_key = _vp_key
+                log(f"KEY={KEY} (from VPLink URL)")
+        except Exception:
+            pass
+
     # ── CLICK the element if found (matching CDP behavior); else navigate directly ──
     clicked = False
     if vplink_url:
