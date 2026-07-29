@@ -2766,6 +2766,14 @@ def navigate_youtube_for_vplink(video_url):
     global KEY, BASE_DOMAIN, _current_key
     log(f"YouTube nav: {video_url[:80]}")
 
+    # Convert youtu.be short URL to full watch URL
+    if 'youtu.be' in video_url.lower():
+        from urllib.parse import urlparse
+        vid = urlparse(video_url).path.lstrip('/').split('?')[0].split('#')[0]
+        if vid:
+            video_url = f"https://www.youtube.com/watch?v={vid}"
+            log(f"Converted to full URL")
+
     # 1. Navigate to the YouTube video
     try:
         adpt_load.set_page_load(driver)
@@ -2776,20 +2784,38 @@ def navigate_youtube_for_vplink(video_url):
         log(f"YouTube nav failed: {e}")
         return False
 
-    ready, height, bl = wait_for_page_ready(min_height=200, timeout_sec=20)
+    # Wait for skeleton to finish — page starts as skeleton HTML, JS loads later
+    ready, height, bl = wait_for_page_ready(min_height=200, timeout_sec=30)
     log(f"YouTube page ready: {ready}, h={height}, bl={bl}")
     if not ready and bl < 100:
         log("YouTube page empty — aborting YouTube nav")
         return False
 
-    human_delay(3000, 5000)
+    # Wait for YouTube's JS framework to render the actual page
+    for _ in range(30):
+        rendered = safe_eval("""
+            return document.querySelector('ytd-watch-flexy, ytd-watch, '
+                + '#primary, ytd-page-manager') !== null;
+        """)
+        if rendered:
+            break
+        ms(1000)
+    log(f"YT framework rendered: {rendered}")
 
-    # 2. Dismiss sign-in overlay if present
+    human_delay(2000, 4000)
+
+    # 2. Dismiss sign-in / cookie overlays
     safe_eval("""
-        document.querySelectorAll('button[aria-label*="Close"], '
-            + '[aria-label*="Dismiss"], [aria-label*="No thanks"], '
-            + '.yt-spec-button-shape-next--icon-only')
-            .forEach(function(b) { b.click(); });
+        [...document.querySelectorAll('button')]
+            .filter(b => /close|dismiss|no thanks|skip|got it|reject/i
+                .test((b.textContent||'') + (b.getAttribute('aria-label')||'')))
+            .forEach(b => b.click());
+    """)
+    # Dismiss sign-in popup channel icon
+    safe_eval("""
+        document.querySelectorAll('ytd-button-renderer a, '
+            + '[aria-label*="Close"], .yt-spec-button-shape-next--icon-only')
+            .forEach(b => { try { b.click(); } catch(e) {} });
     """)
 
     # 3. Mute and play the video
@@ -2802,69 +2828,126 @@ def navigate_youtube_for_vplink(video_url):
             for (var i = 0; i < btns.length; i++) btns[i].click();
         })();
     """)
-    human_delay(1000, 2000)
+    ms(2000)
 
-    # 4. Watch ~60 seconds — resume playback every 10s if paused
+    # 4. Watch ~60 seconds — during this time, scroll progressively deeper
+    #    to trigger YouTube's lazy-loaded comments section.
+    #    YouTube uses IntersectionObserver: comments load when scrolled into view.
+    vplink_url = None
+    page_height = height
+
     for sec in range(60):
-        ms(1000)
+        ms(750)
+        # Scatter scroll events throughout the watch period:
+        # early: subtle scrolls; mid: reach past player; late: deep into comments
+        if sec == 5:
+            safe_eval("window.scrollTo(0, 600);")
+        elif sec == 12:
+            safe_eval("window.scrollTo(0, 1600);")
+        elif sec == 20:
+            safe_eval("window.scrollTo(0, 2800);")
+        elif sec == 30:
+            safe_eval("window.scrollTo(0, 4000);")
+        elif sec == 40:
+            safe_eval("window.scrollTo(0, 5500);")
+        elif sec == 50:
+            safe_eval("window.scrollTo(0, 7000);")
+
+        # Resume playback if paused
         if sec > 0 and sec % 10 == 0:
             safe_eval("""
                 var v = document.querySelector('video');
                 if (v && v.paused) { v.muted = true; v.play().catch(function(){}); }
             """)
 
-    # 5. Scroll to the comment section and wait for comments to load
-    safe_eval("""
-        (function() {
-            var sel = '#comments, ytd-comments, ytm-comment-section-renderer, '
-                    + '#comment-section, ytd-item-section-renderer, '
-                    + 'ytd-comment-thread-renderer, ytm-comment-thread-renderer';
-            var c = document.querySelector(sel);
-            if (c) { c.scrollIntoView({block: 'start', behavior: 'instant'}); return; }
-            window.scrollTo(0, document.documentElement.scrollHeight * 0.65);
-        })();
-    """)
+        # Every 15 seconds, check for VPLink URL in the DOM
+        if sec > 10 and sec % 15 == 0:
+            found = _find_vplink_in_dom()
+            if found:
+                vplink_url = found
+                log(f"VPLink URL found at {sec}s: {vplink_url[:60]}")
+                break
+
+    # 5. If not found yet, scroll aggressively to very end and re-check
+    if not vplink_url:
+        log("Scrolling aggressively to reach comments...")
+        for i in range(40):
+            safe_eval(f"window.scrollTo(0, {i * 400});")
+            ms(200)
+            if i % 5 == 0:
+                found = _find_vplink_in_dom()
+                if found:
+                    vplink_url = found
+                    log(f"VPLink URL found during aggressive scroll: {vplink_url[:60]}")
+                    break
+
+    # 6. If still not found, wait for any pending API calls and try page_source
+    if not vplink_url:
+        ms(5000)
+        log("Final attempt: scanning full page source HTML...")
+        try:
+            source = driver.page_source
+        except Exception:
+            source = ""
+        if source:
+            import re as _re
+            m = _re.search(r'https?://vplink\.in/[a-zA-Z0-9]+', source)
+            if m:
+                vplink_url = m.group(0)
+                log(f"VPLink found in page_source: {vplink_url[:60]}")
+
+    if not vplink_url:
+        log("No VPLink URL found on YouTube page")
+        return False
+
+    # 7. Extract the real VPLink URL from YouTube's redirect wrapper
+    from urllib.parse import urlparse, parse_qs, unquote
+    parsed = urlparse(vplink_url)
+    if parsed.hostname and 'youtube' in parsed.hostname and 'redirect' in parsed.path:
+        qs = parse_qs(parsed.query)
+        actual = qs.get('q', [None])[0]
+        if actual:
+            vplink_url = unquote(actual)
+            log(f"Extracted from YouTube redirect: {vplink_url[:60]}")
+
+    # 8. Extract KEY and BASE_DOMAIN from the VPLink URL
+    parsed_vp = urlparse(vplink_url)
+    if parsed_vp.hostname:
+        BASE_DOMAIN = parsed_vp.hostname
+    vp_path = parsed_vp.path.lstrip("/").split("?")[0].split("#")[0]
+    if vp_path:
+        KEY = vp_path
+        _current_key = vp_path
+        log(f"Set KEY={KEY} BASE_DOMAIN={BASE_DOMAIN} from VPLink URL")
+
+    # 9. Navigate to the VPLink URL
+    try:
+        adpt_load.set_page_load(driver)
+        nav_start = time.time()
+        driver.get(vplink_url)
+        adpt_nav.observe(time.time() - nav_start)
+    except Exception as e:
+        log(f"VPLink nav failed: {e} — trying JS redirect")
+        safe_eval("window.location.href = '" + vplink_url.replace("'", "\\'") + "';")
+        ms(3000)
+
     human_delay(3000, 5000)
 
-    # Click any expand/load-more buttons to reveal comment section
-    safe_eval("""
-        document.querySelectorAll(
-            'button[aria-label*="comment"], #comments-button, '
-            + '#show-more-comments, ytd-continuation-item-renderer button, '
-            + 'ytm-comment-section-renderer button, '
-            + 'ytd-button-renderer a, [aria-label*="Comments"], '
-            + '[aria-label*="View comments"]'
-        ).forEach(function(b) { b.click(); });
-    """)
-    human_delay(2000, 3000)
+    # Verify we left YouTube
+    url = safe_url()
+    log(f"Post-YouTube URL: {url[:100] if url else 'None'}")
+    if not url or 'youtube' in url:
+        log("Still on YouTube after VPLink nav — YouTube nav failed")
+        return False
 
-    # Scroll incrementally, waiting for comment threads to appear
-    max_scrolls = 25
-    for _ in range(max_scrolls):
-        safe_eval("window.scrollBy(0, 400);")
-        ms(250)
-        has_comments = safe_eval("""
-            return document.querySelectorAll(
-                'ytd-comment-thread-renderer, ytm-comment-thread-renderer, '
-                + '#content-text, ytd-comment-renderer'
-            ).length > 0;
-        """)
-        if has_comments:
-            break
+    log("YouTube nav: successfully entered VPLink funnel")
+    return True
 
-    # If comments still not found, scroll more aggressively
-    if not has_comments:
-        for _ in range(15):
-            safe_eval("window.scrollBy(0, 600);")
-            ms(200)
 
-    human_delay(3000, 4000)
-
-    # 6. Locate a VPLink URL — try multiple strategies
-    vplink_url = None
-
-    # Strategy A: all anchor tags containing vplink.in (direct or via redirect)
-    vplink_url = safe_eval("""
+def _find_vplink_in_dom():
+    """Search current DOM for VPLink URL. Returns URL string or None."""
+    # Strategy A: anchor tags containing vplink.in or YouTube redirect
+    result = safe_eval("""
         (function() {
             var links = document.querySelectorAll('a[href*="vplink.in"], '
                 + 'a[href*="/redirect"]');
@@ -2882,75 +2965,24 @@ def navigate_youtube_for_vplink(video_url):
             return null;
         })();
     """)
-    if vplink_url and vplink_url.startswith('http'):
-        pass  # already a URL
-    elif vplink_url:
-        # q param from redirect - decode it
+    if result:
+        if result.startswith('http'):
+            return result
         from urllib.parse import unquote
-        vplink_url = unquote(vplink_url)
+        return unquote(result)
 
-    # Strategy B: scan full page HTML for vplink.in pattern
-    if not vplink_url:
-        log("VPLink not found in anchors, scanning full page HTML...")
-        vplink_url = safe_eval("""
-            (function() {
-                var html = document.documentElement.outerHTML;
-                var m = html.match(/https?\\:\\/\\/vplink\\.in\\/[a-zA-Z0-9]+/i);
-                if (m) return m[0];
-                m = html.match(/vplink\\.in\\/[a-zA-Z0-9]+/i);
-                if (m) return 'https://' + m[0];
-                return null;
-            })();
-        """)
-
-    if not vplink_url:
-        log("No VPLink URL found on YouTube page")
-        return False
-
-    log(f"VPLink URL found: {vplink_url[:80]}")
-
-    # 7. Extract the real VPLink URL from YouTube's redirect wrapper
-    from urllib.parse import urlparse, parse_qs, unquote
-    parsed = urlparse(vplink_url)
-    if parsed.hostname and 'youtube' in parsed.hostname and 'redirect' in parsed.path:
-        qs = parse_qs(parsed.query)
-        actual = qs.get('q', [None])[0]
-        if actual:
-            vplink_url = unquote(actual)
-            log(f"Extracted from YouTube redirect: {vplink_url[:60]}")
-
-    # 8. Extract KEY and BASE_DOMAIN from the VPLink URL for fallback navigation
-    parsed_vp = urlparse(vplink_url)
-    if parsed_vp.hostname:
-        BASE_DOMAIN = parsed_vp.hostname
-    vp_path = parsed_vp.path.lstrip("/").split("?")[0].split("#")[0]
-    if vp_path:
-        KEY = vp_path
-        _current_key = vp_path
-        log(f"Set KEY={KEY} BASE_DOMAIN={BASE_DOMAIN} from VPLink URL")
-
-    # 9. Navigate to the VPLink URL in the current tab
-    try:
-        adpt_load.set_page_load(driver)
-        nav_start = time.time()
-        driver.get(vplink_url)
-        adpt_nav.observe(time.time() - nav_start)
-    except Exception as e:
-        log(f"VPLink nav failed: {e} — trying JS redirect")
-        safe_eval("window.location.href = '" + vplink_url.replace("'", "\\'") + "';")
-        ms(3000)
-
-    human_delay(3000, 5000)
-
-    # 9. Verify we left YouTube
-    url = safe_url()
-    log(f"Post-YouTube URL: {url[:100] if url else 'None'}")
-    if not url or 'youtube' in url:
-        log("Still on YouTube after VPLink nav — YouTube nav failed")
-        return False
-
-    log("YouTube nav: successfully entered VPLink funnel")
-    return True
+    # Strategy B: full page HTML regex
+    result = safe_eval("""
+        (function() {
+            var html = document.documentElement.outerHTML;
+            var m = html.match(/https?\\:\\/\\/vplink\\.in\\/[a-zA-Z0-9]+/i);
+            if (m) return m[0];
+            m = html.match(/vplink\\.in\\/[a-zA-Z0-9]+/i);
+            if (m) return 'https://' + m[0];
+            return null;
+        })();
+    """)
+    return result
 
 
 # ══════════════════════════════════════════════════════════════
