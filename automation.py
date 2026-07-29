@@ -2790,49 +2790,48 @@ def _find_vplink_element():
 
     el_info = safe_eval("""
         var url = arguments[0];
-        (function() {
-            var base = window.location.origin;
-            var links = document.querySelectorAll('a[href]');
+        function checkEl(el) {
+            var h = el.href || '';
+            if (h.indexOf('vplink') > -1) return true;
+            if (h.indexOf('/redirect') > -1) {
+                try {
+                    var u = new URL(h);
+                    var q = u.searchParams.get('q') || '';
+                    if (q.indexOf('vplink') > -1) return true;
+                } catch(e) {}
+            }
+            return false;
+        }
+        function checkRoot(root) {
+            if (!root) return null;
+            var links = root.querySelectorAll('a[href*=\"/redirect\"]');
             for (var i = 0; i < links.length; i++) {
-                var h = links[i].href || '';
-                if (h.indexOf('vplink') > -1) {
-                    return JSON.stringify({found:true, tag:links[i].tagName,
-                        text:(links[i].textContent||'').trim().slice(0,100)});
-                }
-                if (h.indexOf('/redirect') > -1) {
-                    try {
-                        var u = new URL(h, base);
-                        var q = u.searchParams.get('q') || '';
-                        if (q.indexOf('vplink') > -1) {
-                            return JSON.stringify({found:true, tag:links[i].tagName,
-                                text:(links[i].textContent||'').trim().slice(0,100)});
-                        }
-                    } catch(e) {}
+                if (checkEl(links[i])) return links[i];
+            }
+            var all = root.querySelectorAll('*');
+            for (var i = 0; i < all.length; i++) {
+                var t = all[i].textContent || '';
+                if (t.indexOf('vplink.in') > -1) {
+                    var clickable = all[i].closest('a');
+                    return clickable || all[i];
                 }
             }
-            var byAria = document.querySelector('[aria-label*="vplink.in" i]');
-            if (byAria) {
-                return JSON.stringify({found:true, tag:byAria.tagName,
-                    text:(byAria.textContent||'').trim().slice(0,100)});
+            return null;
+        }
+        var sel = 'ytd-comment-view-model, ytm-comment-view-model, '
+            + 'ytd-comment-thread-renderer, ytm-comment-thread-renderer, '
+            + '#content-text, ytd-comments, #comments';
+        var containers = document.querySelectorAll(sel);
+        for (var c = 0; c < containers.length; c++) {
+            var el = checkRoot(containers[c]);
+            if (!el && containers[c].shadowRoot)
+                el = checkRoot(containers[c].shadowRoot);
+            if (el) {
+                return JSON.stringify({found:true, tag:el.tagName,
+                    text:(el.textContent||'').trim().slice(0,100)});
             }
-            var containers = document.querySelectorAll(
-                '#content-text, ytd-comment-renderer, ytm-comment-renderer, '
-                + 'ytd-comment-thread-renderer, ytm-comment-thread-renderer, '
-                + '#comments, ytd-comments');
-            for (var c = 0; c < containers.length; c++) {
-                var all = containers[c].querySelectorAll('*');
-                for (var i = 0; i < all.length; i++) {
-                    var t = all[i].textContent || '';
-                    if (t.indexOf('vplink.in') > -1) {
-                        var clickable = all[i].closest('a');
-                        if (!clickable) clickable = all[i];
-                        return JSON.stringify({found:true, tag:clickable.tagName,
-                            text:(clickable.textContent||'').trim().slice(0,100)});
-                    }
-                }
-            }
-            return JSON.stringify({found:false});
-        })();
+        }
+        return JSON.stringify({found:false});
     """, url)
 
     if el_info:
@@ -3027,36 +3026,45 @@ def navigate_youtube_for_vplink(video_url):
         log(f"VPLink found: {vplink_url[:80]} (element: {has_element})")
         ms(1000)
 
-        if has_element:
-            # Element was found in light DOM — click it (matches CDP behavior)
-            click_result = safe_eval("""
-                var url = arguments[0];
-                (function() {
-                    var base = window.location.origin;
-                    var sel = 'a[href*="vplink.in"], a[href*="/redirect"], '
-                        + '[aria-label*="vplink.in" i], a, [role="button"]';
-                    var el = document.querySelector(sel);
-                    if (!el) {
-                        var containers = document.querySelectorAll(
-                            '#content-text, ytd-comment-renderer, ytm-comment-renderer, '
-                            + 'ytd-comment-thread-renderer, ytm-comment-thread-renderer, '
-                            + '#comments, ytd-comments');
-                        for (var c = 0; c < containers.length; c++) {
-                            el = containers[c].querySelector(sel);
-                            if (el) break;
-                        }
-                    }
-                    if (el && el.offsetParent !== null) {
-                        el.scrollIntoView({block:'center'});
-                        el.click();
-                        el.dispatchEvent(new MouseEvent('click', {bubbles:true}));
-                        return 'clicked';
-                    }
-                    return 'not_visible';
-                })();
-            """, vplink_url)
-            log(f"VPLink click: {click_result}")
-            clicked = (click_result == 'clicked')
+        # Always try to click first — search both light DOM + comment shadow roots
+        click_result = safe_eval("""
+            var url = arguments[0];
+            function findIn(root) {
+                if (!root) return null;
+                var sel = 'a[href*="/redirect"], a[href*="vplink.in"], '
+                    + '[aria-label*="vplink.in" i]';
+                var el = root.querySelector(sel);
+                if (el) return el;
+                var all = root.querySelectorAll('*');
+                for (var i = 0; i < all.length; i++) {
+                    var t = all[i].textContent || '';
+                    if (t.indexOf('vplink.in') > -1)
+                        return all[i].closest('a') || all[i];
+                }
+                return null;
+            }
+            var el = findIn(document);
+            if (!el) {
+                var containers = document.querySelectorAll(
+                    'ytd-comment-view-model, ytm-comment-view-model, '
+                    + '#content-text, #comments, ytd-comments');
+                for (var c = 0; c < containers.length; c++) {
+                    el = findIn(containers[c]);
+                    if (!el && containers[c].shadowRoot)
+                        el = findIn(containers[c].shadowRoot);
+                    if (el) break;
+                }
+            }
+            if (el) {
+                el.scrollIntoView({block:'center'});
+                el.click();
+                el.dispatchEvent(new MouseEvent('click', {bubbles:true}));
+                return 'clicked';
+            }
+            return 'not_found';
+        """, vplink_url)
+        log(f"VPLink click: {click_result}")
+        clicked = (click_result == 'clicked')
 
         if not clicked:
             # Click failed or no element — navigate directly
