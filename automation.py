@@ -2774,7 +2774,28 @@ def navigate_youtube_for_vplink(video_url):
             video_url = f"https://www.youtube.com/watch?v={vid}"
             log(f"Converted to full URL")
 
-    # 1. Navigate to the YouTube video
+    # 1. Switch to desktop viewport for YouTube navigation.
+    #    Mobile YouTube (ytm-) puts comments in a carousel tab that requires
+    #    explicit user interaction. Desktop YouTube shows comments inline.
+    safe_eval("""
+        if (window.chrome && chrome.debugger) {
+            chrome.debugger.sendCommand('Emulation.setDeviceMetricsOverride', {
+                width: 1354, height: 848, deviceScaleFactor: 1,
+                mobile: false
+            });
+        }
+    """)
+    # Also try the CDP approach via execute_cdp_cmd
+    try:
+        driver.execute_cdp_cmd('Emulation.setDeviceMetricsOverride', {
+            'width': 1354, 'height': 848, 'deviceScaleFactor': 1,
+            'mobile': False
+        })
+        log("Set desktop viewport for YouTube")
+    except Exception as e:
+        log(f"Viewport switch failed (non-fatal): {e}")
+
+    # Navigate to the YouTube video
     try:
         adpt_load.set_page_load(driver)
         nav_start = time.time()
@@ -2784,34 +2805,29 @@ def navigate_youtube_for_vplink(video_url):
         log(f"YouTube nav failed: {e}")
         return False
 
-    # Wait for skeleton to finish — page starts as skeleton HTML, JS loads later
+    # Wait for page to fully load
     ready, height, bl = wait_for_page_ready(min_height=200, timeout_sec=30)
     log(f"YouTube page ready: {ready}, h={height}, bl={bl}")
     if not ready and bl < 100:
         log("YouTube page empty — aborting YouTube nav")
         return False
 
-    # Wait for YouTube's JS framework to render the actual page.
-    # We use mobile emulation (390x844, mobile UA) so YouTube serves mobile HTML.
-    # Check for both mobile (ytm-) and desktop (ytd-) elements.
-    # The skeleton HTML already contains ytm-watch; we wait for JS-rendered content.
+    # Wait for YouTube's JS framework to render (desktop: ytd- elements)
     skeleton_ok = safe_eval("""
-        return !!document.querySelector('ytm-app, ytd-app');
+        return !!document.querySelector('ytd-app, ytm-app');
     """)
     log(f"YT skeleton present: {skeleton_ok}")
 
     for _ in range(30):
         rendered = safe_eval("""
-            return document.querySelector('ytm-comment-section-renderer, '
-                + 'ytm-item-section-renderer, ytd-comments, '
+            return document.querySelector('ytd-watch-flexy, ytd-comments, '
                 + '#comments, ytd-comment-thread-renderer, '
-                + 'ytm-comment-thread-renderer, #comment-section, '
-                + '#content-text') !== null;
+                + '#comment-section, #content-text') !== null;
         """)
         if rendered:
             break
         ms(1000)
-    log(f"YT comments section rendered: {rendered}")
+    log(f"YT comments rendered: {rendered}")
 
     human_delay(2000, 4000)
 
@@ -2829,23 +2845,70 @@ def navigate_youtube_for_vplink(video_url):
             .forEach(b => { try { b.click(); } catch(e) {} });
     """)
 
-    # 3. Scroll to comments and find VPLink URL
+    # 3. Scroll to comments section to trigger lazy-loading API call.
+    #    YouTube uses IntersectionObserver: comments load when scrolled into view.
+    #    We scroll into the actual comment section element first, then wait.
     vplink_url = None
 
+    # Try immediate check (VPLink might be in initial data)
     vplink_url = _find_vplink_in_dom()
 
     if not vplink_url:
-        log("Scrolling to find comment section...")
-        for i in range(40):
-            safe_eval(f"window.scrollTo(0, {i * 400});")
-            ms(200)
-            vplink_url = _find_vplink_in_dom()
-            if vplink_url:
-                log(f"VPLink found at scroll pos {i * 400}: {vplink_url[:60]}")
+        log("Scrolling comment section into view...")
+        safe_eval("""
+            (function() {
+                var sel = 'ytm-comment-section-renderer, ytd-comments, '
+                    + '#comments, ytm-item-section-renderer, '
+                    + 'ytd-comment-thread-renderer, ytm-comment-thread-renderer, '
+                    + '#comment-section, ytm-slim-video-metadata-section, '
+                    + '#sections, ytm-section-list-renderer';
+                var el = document.querySelector(sel);
+                if (el) {
+                    el.scrollIntoView({block: 'start', behavior: 'instant'});
+                    return 'found:' + (el.id || el.tagName);
+                }
+                window.scrollTo(0, document.documentElement.scrollHeight * 0.6);
+                return 'fallback_scroll';
+            })();
+        """)
+        ms(3000)
+
+        # Wait for actual comment threads to appear (API call completes)
+        for w in range(20):
+            has_threads = safe_eval("""
+                return document.querySelectorAll(
+                    'ytm-comment-thread-renderer, ytd-comment-thread-renderer, '
+                    + '#content-text, ytd-comment-renderer, '
+                    + 'ytm-comment-renderer, [class*="comment"]'
+                ).length > 0;
+            """)
+            if has_threads:
+                log(f"Comment threads appeared after {w+1}s")
                 break
+            ms(1000)
+
+        # If still no threads, scroll deeper and try again
+        if not has_threads:
+            log("Comments not loaded yet, scrolling deeper...")
+            for i in range(30):
+                safe_eval(f"window.scrollTo(0, {(i+1) * 500});")
+                ms(300)
+                has_threads = safe_eval("""
+                    return document.querySelectorAll(
+                        'ytm-comment-thread-renderer, ytd-comment-thread-renderer, '
+                        + '#content-text'
+                    ).length > 0;
+                """)
+                if has_threads:
+                    log(f"Comment threads found at scroll {(i+1)*500}")
+                    ms(2000)
+                    break
+
+        # Now search for VPLink URL in loaded comments
+        vplink_url = _find_vplink_in_dom()
 
     if not vplink_url:
-        ms(3000)
+        ms(2000)
         vplink_url = _find_vplink_in_dom()
         if not vplink_url:
             try:
@@ -2902,6 +2965,15 @@ def navigate_youtube_for_vplink(video_url):
     if not url or 'youtube' in url:
         log("Still on YouTube after VPLink nav — YouTube nav failed")
         return False
+
+    # Restore mobile viewport for the funnel (article pages work better with mobile)
+    try:
+        driver.execute_cdp_cmd('Emulation.setDeviceMetricsOverride', {
+            'width': 390, 'height': 844, 'deviceScaleFactor': 1,
+            'mobile': True
+        })
+    except Exception:
+        pass
 
     log("YouTube nav: successfully entered VPLink funnel")
     return True
