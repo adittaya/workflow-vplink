@@ -3063,14 +3063,13 @@ def navigate_youtube_for_vplink(video_url):
         except Exception:
             pass
 
-    # ── CLICK the element if found (matching CDP behavior); else navigate directly ──
+    # ── FIND the element, get its real href, and try to click ──
     clicked = False
+    el_href = ''
     if vplink_url:
-        log(f"VPLink found: {vplink_url[:80]} (element: {has_element})")
         ms(1000)
 
-        # Use JS to FIND + scrollIntoView + return element box, then CDP to click (trusted events)
-        el_box = safe_eval("""
+        el_details = safe_eval("""
             var url = arguments[0];
             function findIn(root) {
                 if (!root) return null;
@@ -3099,73 +3098,68 @@ def navigate_youtube_for_vplink(video_url):
                 }
             }
             if (el) {
-                el.scrollIntoView({block:'center'});
                 var r = el.getBoundingClientRect();
+                var style = window.getComputedStyle(el);
                 return JSON.stringify({
-                    x: Math.round(r.left + r.width/2),
-                    y: Math.round(r.top + r.height/2),
+                    found: true,
+                    tag: el.tagName,
+                    cx: Math.round(r.left + r.width/2),
+                    cy: Math.round(r.top + r.height/2),
                     w: Math.round(r.width),
-                    h: Math.round(r.height)
+                    h: Math.round(r.height),
+                    pe: style.pointerEvents,
+                    href: (el.href || ''),
+                    text: (el.textContent||'').trim().slice(0,80)
                 });
             }
             return 'null';
         """, vplink_url)
 
-        if el_box and el_box != 'null':
+        el_data = None
+        if el_details and el_details != 'null':
             try:
-                import json as _j_click
-                box = _j_click.loads(el_box)
-                cx, cy = box['x'], box['y']
-                log(f"VPLink element center: ({cx}, {cy})")
+                import json as _j_det
+                el_data = _j_det.loads(el_details)
+            except Exception:
+                pass
 
-                # Dispatch trusted tap gesture via Chrome DevTools Protocol
-                # Mobile YouTube uses touch event listeners; CDP synthesizeTapGesture
-                # generates the full touchStart→touchEnd lifecycle with correct timing
-                tap_ok = False
+        if el_data and el_data.get('found'):
+            cx, cy = el_data.get('cx'), el_data.get('cy')
+            el_href = (el_data.get('href') or '').strip()
+            log(f"VPLink el: {el_data.get('tag')}@({cx},{cy}) "
+                f"{el_data.get('w')}x{el_data.get('h')} "
+                f"pe={el_data.get('pe')} "
+                f"href={el_href[:120]}")
+            log(f"VPLink text: {el_data.get('text','')}")
+
+            # Try CDP dispatchTouchEvent with proper touchStart → touchEnd sequence
+            touch_ok = False
+            if cx and cy:
+                try:
+                    driver.execute_cdp_cmd('Input.dispatchTouchEvent', {
+                        'type': 'touchStart',
+                        'touchPoints': [{'x': cx, 'y': cy, 'id': 1, 'radiusX': 24, 'radiusY': 24, 'force': 0.5}],
+                    })
+                    ms(100)
+                    driver.execute_cdp_cmd('Input.dispatchTouchEvent', {
+                        'type': 'touchEnd',
+                        'touchPoints': [],
+                    })
+                    ms(50)
+                    touch_ok = True
+                    log("VPLink CDP touch: dispatched")
+                except Exception as te:
+                    log(f"CDP touch failed ({te})")
+            if not touch_ok:
                 try:
                     driver.execute_cdp_cmd('Input.synthesizeTapGesture', {
-                        'x': cx, 'y': cy,
-                        'duration': 80,
-                        'tapCount': 1,
-                        'gestureSourceType': 'touch',
+                        'x': cx, 'y': cy, 'duration': 100, 'tapCount': 1,
                     })
-                    tap_ok = True
-                    log("VPLink CDP tap: dispatched (synthesizeTapGesture)")
-                except Exception as tap_e:
-                    log(f"synthesizeTapGesture failed ({tap_e}), trying dispatchTouchEvent...")
-                if not tap_ok:
-                    try:
-                        driver.execute_cdp_cmd('Input.dispatchTouchEvent', {
-                            'type': 'touchStart',
-                            'touchPoints': [{'x': cx, 'y': cy, 'id': 1, 'radiusX': 20, 'radiusY': 20}],
-                            'modifiers': 0,
-                        })
-                        ms(80)
-                        # TouchEnd must NOT contain touchPoints per CDP spec
-                        driver.execute_cdp_cmd('Input.dispatchTouchEvent', {
-                            'type': 'touchEnd',
-                            'touchPoints': [],
-                            'modifiers': 0,
-                        })
-                        log("VPLink CDP tap: dispatched (dispatchTouchEvent)")
-                    except Exception as te:
-                        log(f"dispatchTouchEvent also failed ({te})")
-            except Exception as e:
-                log(f"CDP click failed ({e}), trying JS click...")
-                safe_eval("""
-                    var el = document.querySelector(
-                        'a[href*="/redirect"], a[href*="vplink.in"], '
-                        + '[aria-label*="vplink.in" i]');
-                    if (el) { el.scrollIntoView({block:'center'}); el.click(); }
-                """)
+                    log("VPLink synthesizeTapGesture: dispatched")
+                except Exception as se:
+                    log(f"synthesizeTapGesture failed ({se})")
         else:
-            log("VPLink element not found for click")
-            safe_eval("""
-                var el = document.querySelector(
-                    'a[href*="/redirect"], a[href*="vplink.in"], '
-                    + '[aria-label*="vplink.in" i]');
-                if (el) { el.scrollIntoView({block:'center'}); el.click(); }
-            """)
+            log("VPLink element not found in DOM")
 
         # Whether click dispatched or not, check if we navigated away from YouTube
         ms(3000)
@@ -3177,24 +3171,19 @@ def navigate_youtube_for_vplink(video_url):
             clicked = True
 
         if not clicked:
-            # Click failed or no element — navigate directly
-            log("Navigating via driver.get()")
+            # Click failed — navigate using element's actual href (YouTube redirect URL)
+            nav_url = el_href or vplink_url
+            log(f"Navigating via driver.get() to: {nav_url[:120]}")
             from urllib.parse import urlparse, parse_qs, unquote
-            parsed = urlparse(vplink_url)
-            if 'youtube' in (parsed.hostname or '') and 'redirect' in parsed.path:
-                qs = parse_qs(parsed.query)
-                actual = qs.get('q', [None])[0]
-                if actual:
-                    vplink_url = unquote(actual)
             try:
                 adpt_load.set_page_load(driver)
                 ns = time.time()
-                driver.get(vplink_url)
+                driver.get(nav_url)
                 adpt_nav.observe(time.time() - ns)
                 clicked = True
             except Exception as e:
                 log(f"Nav failed: {e} — JS fallback")
-                safe_eval("location.href='" + vplink_url.replace("'", "\\'") + "';")
+                safe_eval("location.href='" + nav_url.replace("'", "\\'") + "';")
                 ms(3000)
                 clicked = True
 
