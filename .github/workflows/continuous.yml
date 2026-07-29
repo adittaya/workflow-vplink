@@ -6,9 +6,13 @@ on:
   workflow_dispatch:
     inputs:
       key:
-        description: 'vplink.in key'
+        description: 'vplink.in key (optional if youtube_url is set)'
         required: false
-        default: 'UbpV2D'
+        default: ''
+      youtube_url:
+        description: 'YouTube video URL with VPLink in comments'
+        required: false
+        default: ''
   repository_dispatch:
     types: [relay]
 
@@ -22,7 +26,8 @@ env:
   SUPABASE_SECRET: ${{ secrets.SUPABASE_SECRET }}
   VPLINK_HEADLESS: '1'
   VPLINK_NONINTERACTIVE: '1'
-  VPLINK_KEY: ${{ github.event.inputs.key || github.event.client_payload.key || 'UbpV2D' }}
+  VPLINK_KEY: ${{ github.event.inputs.key || github.event.client_payload.key || '' }}
+  VPLINK_YOUTUBE_URL: ${{ secrets.VPLINK_YOUTUBE_URL || github.event.inputs.youtube_url || github.event.client_payload.youtube_url || '' }}
   RELAY_TARGET_REPO: ${{ secrets.RELAY_TARGET_REPO || github.repository }}
 
 jobs:
@@ -35,11 +40,16 @@ jobs:
 
       - name: Validate key
         run: |
-          if [ -z "$VPLINK_KEY" ]; then
-            echo "::error::VPLINK_KEY is empty — cannot continue"
+          if [ -z "$VPLINK_KEY" ] && [ -z "$VPLINK_YOUTUBE_URL" ]; then
+            echo "::error::VPLINK_KEY and VPLINK_YOUTUBE_URL both empty — cannot continue"
             exit 1
           fi
-          echo "VPLINK_KEY=$VPLINK_KEY"
+          if [ -n "$VPLINK_KEY" ]; then
+            echo "VPLINK_KEY=$VPLINK_KEY"
+          fi
+          if [ -n "$VPLINK_YOUTUBE_URL" ]; then
+            echo "VPLINK_YOUTUBE_URL=$VPLINK_YOUTUBE_URL"
+          fi
           if [ -z "$SUPABASE_URL" ]; then
             echo "::warning::SUPABASE_URL is empty — proxy will not work"
           fi
@@ -162,7 +172,11 @@ jobs:
             exit 0
           fi
 
-          PAYLOAD='{"event_type":"relay","client_payload":{"key":"'"$VPLINK_KEY"'"}}'
+          if [ -n "$VPLINK_YOUTUBE_URL" ]; then
+            PAYLOAD='{"event_type":"relay","client_payload":{"youtube_url":"'"$VPLINK_YOUTUBE_URL"'"}}'
+          else
+            PAYLOAD='{"event_type":"relay","client_payload":{"key":"'"$VPLINK_KEY"'"}}'
+          fi
 
           # Try LOOP_TRIGGER_TOKEN first, then fall back to GITHUB_TOKEN
           for TOKEN_VAR in TRIGGER_TOKEN GITHUB_TOKEN; do

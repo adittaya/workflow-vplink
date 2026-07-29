@@ -76,21 +76,25 @@ def _detect_chrome_binary() -> str:
 BASE_DOMAIN = "vplink.in"
 KEY = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("VPLINK_KEY", "")
 _current_key = KEY
-if not KEY:
-    print("Usage: python3 automation.py <key_or_url>", file=sys.stderr)
+YOUTUBE_URL_ENV = os.environ.get("VPLINK_YOUTUBE_URL", "")
+
+if not KEY and not YOUTUBE_URL_ENV:
+    print("Usage: python3 automation.py <key_or_url>  OR  set VPLINK_YOUTUBE_URL", file=sys.stderr)
     sys.exit(1)
 
-if KEY.startswith("http"):
-    from urllib.parse import urlparse
-    parsed = urlparse(KEY)
-    BASE_DOMAIN = parsed.hostname or BASE_DOMAIN
-    KEY = parsed.path.lstrip("/").split("?")[0].split("#")[0]
+if KEY:
+    if KEY.startswith("http"):
+        from urllib.parse import urlparse
+        parsed = urlparse(KEY)
+        BASE_DOMAIN = parsed.hostname or BASE_DOMAIN
+        KEY = parsed.path.lstrip("/").split("?")[0].split("#")[0]
+    if not KEY:
+        print("No key extracted from URL", file=sys.stderr)
+        sys.exit(1)
+    START_URL = f"https://{BASE_DOMAIN}/{KEY}"
+else:
+    START_URL = ""
 
-if not KEY:
-    print("No key extracted from URL", file=sys.stderr)
-    sys.exit(1)
-
-START_URL = f"https://{BASE_DOMAIN}/{KEY}"
 DEBUG = "--vplink-debug" in sys.argv or os.environ.get("VPLINK_DEBUG") == "1"
 
 driver = None
@@ -2752,12 +2756,144 @@ def debug_shot(label):
         pass
 
 
+def navigate_youtube_for_vplink(video_url):
+    """Navigate to a YouTube video, watch ~60s, find a VPLink URL in
+    the comment section, click it, and land on the VPLink funnel.
+
+    Returns True if we successfully navigated away from YouTube onto
+    the VPLink funnel (caller should skip direct vplink.in navigation).
+    Returns False on any failure (caller falls back to normal flow)."""
+    global KEY, BASE_DOMAIN, _current_key
+    log(f"YouTube nav: {video_url[:80]}")
+
+    # 1. Navigate to the YouTube video
+    try:
+        adpt_load.set_page_load(driver)
+        nav_start = time.time()
+        driver.get(video_url)
+        adpt_nav.observe(time.time() - nav_start)
+    except Exception as e:
+        log(f"YouTube nav failed: {e}")
+        return False
+
+    ready, height, bl = wait_for_page_ready(min_height=200, timeout_sec=20)
+    log(f"YouTube page ready: {ready}, h={height}, bl={bl}")
+    if not ready and bl < 100:
+        log("YouTube page empty — aborting YouTube nav")
+        return False
+
+    human_delay(3000, 5000)
+
+    # 2. Dismiss sign-in overlay if present
+    safe_eval("""
+        document.querySelectorAll('button[aria-label*="Close"], '
+            + '[aria-label*="Dismiss"], [aria-label*="No thanks"], '
+            + '.yt-spec-button-shape-next--icon-only')
+            .forEach(function(b) { b.click(); });
+    """)
+
+    # 3. Mute and play the video
+    safe_eval("""
+        (function() {
+            var v = document.querySelector('video');
+            if (v) { v.muted = true; v.play().catch(function(){}); }
+            var btns = document.querySelectorAll(
+                '.ytp-large-play-button, button[aria-label*="Play"]');
+            for (var i = 0; i < btns.length; i++) btns[i].click();
+        })();
+    """)
+    human_delay(1000, 2000)
+
+    # 4. Watch ~60 seconds — resume playback every 10s if paused
+    for sec in range(60):
+        ms(1000)
+        if sec > 0 and sec % 10 == 0:
+            safe_eval("""
+                var v = document.querySelector('video');
+                if (v && v.paused) { v.muted = true; v.play().catch(function(){}); }
+            """)
+
+    # 5. Scroll to the comment section (lazy-loaded)
+    safe_eval("""
+        (function() {
+            var c = document.querySelector('#comments, ytd-comments');
+            if (c) { c.scrollIntoView({block: 'start', behavior: 'instant'}); return; }
+            window.scrollTo(0, document.documentElement.scrollHeight * 0.7);
+        })();
+    """)
+    human_delay(3000, 5000)
+
+    # Scroll deeper to trigger lazy-load of more comments
+    for _ in range(5):
+        safe_eval("window.scrollBy(0, 400);")
+        ms(400)
+
+    human_delay(2000, 3000)
+
+    # 6. Locate a VPLink URL anywhere on the page (usually in a comment)
+    vplink_url = safe_eval("""
+        (function() {
+            var links = document.querySelectorAll('a[href*="vplink.in"]');
+            if (links.length > 0) return links[0].href;
+            return null;
+        })();
+    """)
+    if not vplink_url:
+        log("No VPLink URL found on YouTube page")
+        return False
+
+    log(f"VPLink URL found: {vplink_url[:80]}")
+
+    # 7. Extract the real VPLink URL from YouTube's redirect wrapper
+    from urllib.parse import urlparse, parse_qs, unquote
+    parsed = urlparse(vplink_url)
+    if parsed.hostname and 'youtube' in parsed.hostname and 'redirect' in parsed.path:
+        qs = parse_qs(parsed.query)
+        actual = qs.get('q', [None])[0]
+        if actual:
+            vplink_url = unquote(actual)
+            log(f"Extracted from YouTube redirect: {vplink_url[:60]}")
+
+    # 8. Extract KEY and BASE_DOMAIN from the VPLink URL for fallback navigation
+    parsed_vp = urlparse(vplink_url)
+    if parsed_vp.hostname:
+        BASE_DOMAIN = parsed_vp.hostname
+    vp_path = parsed_vp.path.lstrip("/").split("?")[0].split("#")[0]
+    if vp_path:
+        KEY = vp_path
+        _current_key = vp_path
+        log(f"Set KEY={KEY} BASE_DOMAIN={BASE_DOMAIN} from VPLink URL")
+
+    # 9. Navigate to the VPLink URL in the current tab
+    try:
+        adpt_load.set_page_load(driver)
+        nav_start = time.time()
+        driver.get(vplink_url)
+        adpt_nav.observe(time.time() - nav_start)
+    except Exception as e:
+        log(f"VPLink nav failed: {e} — trying JS redirect")
+        safe_eval("window.location.href = '" + vplink_url.replace("'", "\\'") + "';")
+        ms(3000)
+
+    human_delay(3000, 5000)
+
+    # 9. Verify we left YouTube
+    url = safe_url()
+    log(f"Post-YouTube URL: {url[:100] if url else 'None'}")
+    if not url or 'youtube' in url:
+        log("Still on YouTube after VPLink nav — YouTube nav failed")
+        return False
+
+    log("YouTube nav: successfully entered VPLink funnel")
+    return True
+
+
 # ══════════════════════════════════════════════════════════════
 #  Main
 # ══════════════════════════════════════════════════════════════
 
 def main():
-    global driver, destination_url, start_time, profile, proxy_blocked, PROXY, PROXY_HOST, PROXY_IP, PROXY_PORT, _funnel_progress
+    global driver, destination_url, start_time, profile, proxy_blocked, PROXY, PROXY_HOST, PROXY_IP, PROXY_PORT, _funnel_progress, KEY, BASE_DOMAIN
 
     _create_driver()
     monitor.install(driver)
@@ -2792,7 +2928,10 @@ def main():
             pass
 
     log("=" * 50)
-    log(f"starting funnel for KEY={KEY}")
+    if KEY:
+        log(f"starting funnel for KEY={KEY}")
+    else:
+        log(f"starting funnel with YouTube URL (KEY will be extracted from comments)")
     if DEBUG:
         log("debug mode active")
 
@@ -2807,126 +2946,161 @@ def main():
       if proxy_attempt == 0:
         skip_main_loop = False
 
-      referer = os.environ.get("VPLINK_REFERER", "")
-      if referer:
-          log(f"navigating to YouTube first for referral: {referer[:60]}")
-          try:
-              adpt_load.set_page_load(driver)
-              nav_start = time.time()
-              driver.get(referer)
-              adpt_nav.observe(time.time() - nav_start)
-              human_delay(2000, 4000)
-              log("YouTube loaded, now navigating to vplink.in (browser will set Referer)")
-          except Exception as e:
-              log(f"YouTube navigation failed: {e}, continuing without referral")
+      # ── YouTube video navigation mode ──
+      skip_vplink_nav = False
+      youtube_url = os.environ.get("VPLINK_YOUTUBE_URL", "")
+      if youtube_url:
+          log(f"YouTube nav mode: {youtube_url[:60]}")
+          skip_vplink_nav = navigate_youtube_for_vplink(youtube_url)
+          if skip_vplink_nav:
+              log("YouTube nav: entering main loop (skipping vplink.in navigation)")
+          else:
+              log("YouTube nav failed, falling back to normal flow")
+              if not KEY:
+                  log("WARNING: KEY is empty and YouTube nav failed — fallback will not work")
+                  proxy_blocked = True
+                  skip_main_loop = True
 
-      log(f"navigating to vplink.in/{KEY}")
-      debug_shot("01-start")
+      # ── Traffic source referrer (only if YouTube nav didn't already navigate) ──
+      if not skip_vplink_nav:
+          referer = os.environ.get("VPLINK_REFERER", "")
+          if referer:
+              log(f"navigating to YouTube first for referral: {referer[:60]}")
+              try:
+                  adpt_load.set_page_load(driver)
+                  nav_start = time.time()
+                  driver.get(referer)
+                  adpt_nav.observe(time.time() - nav_start)
+                  human_delay(2000, 4000)
+                  log("YouTube loaded, now navigating to vplink.in (browser will set Referer)")
+              except Exception as e:
+                  log(f"YouTube navigation failed: {e}, continuing without referral")
 
-      adpt_load.set_page_load(driver)
-      nav_start = time.time()
-      try:
-          driver.get(f"https://{BASE_DOMAIN}/{KEY}")
-          adpt_nav.observe(time.time() - nav_start)
-      except Exception as e:
-          log(f"first goto failed: {e}, retrying...")
-          if PROXY:
-              report_proxy_failure("first-goto-error")
-          time.sleep(2)
+      if not skip_vplink_nav:
+          log(f"navigating to vplink.in/{KEY}")
+          debug_shot("01-start")
+
+          adpt_load.set_page_load(driver)
+          nav_start = time.time()
           try:
-              adpt_load.set_page_load(driver)
-              nav_start = time.time()
               driver.get(f"https://{BASE_DOMAIN}/{KEY}")
               adpt_nav.observe(time.time() - nav_start)
-          except Exception as e2:
-              log(f"second goto failed: {e2}")
-              adpt_nav.timeout_occured()
+          except Exception as e:
+              log(f"first goto failed: {e}, retrying...")
+              if PROXY:
+                  report_proxy_failure("first-goto-error")
+              time.sleep(2)
               try:
-                  ready = driver.execute_script("return document.readyState")
-                  url_now = safe_url()
-                  has_body = driver.execute_script("return (document.body?.innerHTML || '').length")
-                  log(f"page state after timeout: readyState={ready} url={url_now} body_len={has_body}")
-                  if has_body > 100:
-                      log("page has content despite load timeout — continuing")
-                  else:
-                      log("page empty after load timeout — proxy blocked")
-                      proxy_blocked = True
-                      skip_main_loop = True
-              except Exception:
-                  if PROXY:
-                      proxy_blocked = True
-                      skip_main_loop = True
+                  adpt_load.set_page_load(driver)
+                  nav_start = time.time()
+                  driver.get(f"https://{BASE_DOMAIN}/{KEY}")
+                  adpt_nav.observe(time.time() - nav_start)
+              except Exception as e2:
+                  log(f"second goto failed: {e2}")
+                  adpt_nav.timeout_occured()
+                  try:
+                      ready = driver.execute_script("return document.readyState")
+                      url_now = safe_url()
+                      has_body = driver.execute_script("return (document.body?.innerHTML || '').length")
+                      log(f"page state after timeout: readyState={ready} url={url_now} body_len={has_body}")
+                      if has_body > 100:
+                          log("page has content despite load timeout — continuing")
+                      else:
+                          log("page empty after load timeout — proxy blocked")
+                          proxy_blocked = True
+                          skip_main_loop = True
+                  except Exception:
+                      if PROXY:
+                          proxy_blocked = True
+                          skip_main_loop = True
 
-      if not skip_main_loop:
-          human_delay(2000, 4000)
-      debug_shot("02-after-nav")
+          if not skip_main_loop:
+              human_delay(2000, 4000)
+          debug_shot("02-after-nav")
 
-      if not skip_main_loop:
-          log("waiting for auto-redirect...")
-          redirect_start = time.time()
-          redirect_wait = int(adpt_redirect.get())
-          for i in range(redirect_wait):
-              ms(1000)
-              if "vplink.in" not in safe_url():
-                  break
-          redirect_elapsed = time.time() - redirect_start
-          if "vplink.in" not in safe_url():
-              _left_vplink_at = time.time()
-              adpt_redirect.observe(redirect_elapsed)
-              monitor.install(driver)
-          debug_shot("03-after-redirect")
-
-          # Adaptive redirect chain: keep following until we reach an article or destination
-          for attempt in range(5):
-              url = safe_url()
-              if "vplink.in" not in url or "cdn-cgi" in url:
-                  break
-              has_gl = safe_eval("return !!document.getElementById('get-link');")
-              if has_gl:
-                  log("page loaded (get-link visible)")
-                  break
-              is_cf = safe_eval("""
-                  var html = (document.documentElement?.innerHTML || '').substring(0, 2000);
-                  return html.indexOf('cf-browser-verification') >= 0 || html.indexOf('challenge-form') >= 0
-                      || html.indexOf('cf-challenge') >= 0 || html.indexOf('_cf_chl_opt') >= 0;
-              """)
-              if is_cf:
-                  log("Cloudflare challenge detected")
-              log(f"waiting for page content (attempt {attempt + 1}/5)...")
-              cf_wait = int(adpt_poll.get())
-              loaded = False
-              for i in range(cf_wait):
+          if not skip_main_loop:
+              log("waiting for auto-redirect...")
+              redirect_start = time.time()
+              redirect_wait = int(adpt_redirect.get())
+              for i in range(redirect_wait):
                   ms(1000)
                   if "vplink.in" not in safe_url():
-                      loaded = True
                       break
-                  if safe_eval("return !!document.getElementById('get-link');"):
-                      loaded = True
-                      break
-                  # Also check for article template elements (redirect chain may land on article)
-                  if has_countdown_template():
-                      loaded = True
-                      break
-              if loaded:
-                  break
-              if is_cf:
-                  log("Cloudflare not resolved, reloading...")
-                  try:
-                      driver.refresh()
-                      time.sleep(4)
-                  except Exception:
-                      pass
-              else:
-                  break
+              redirect_elapsed = time.time() - redirect_start
+              if "vplink.in" not in safe_url():
+                  _left_vplink_at = time.time()
+                  adpt_redirect.observe(redirect_elapsed)
+                  monitor.install(driver)
+              debug_shot("03-after-redirect")
 
-          if "vplink.in" in safe_url() and "cdn-cgi" not in safe_url():
-              has_gl = safe_eval("return !!document.getElementById('get-link');")
-              if not has_gl:
-                  log("stuck on vplink.in — proxy may be blocking JS redirects")
+              # Adaptive redirect chain: keep following until we reach an article or destination
+              for attempt in range(5):
+                  url = safe_url()
+                  if "vplink.in" not in url or "cdn-cgi" in url:
+                      break
+                  has_gl = safe_eval("return !!document.getElementById('get-link');")
+                  if has_gl:
+                      log("page loaded (get-link visible)")
+                      break
+                  is_cf = safe_eval("""
+                      var html = (document.documentElement?.innerHTML || '').substring(0, 2000);
+                      return html.indexOf('cf-browser-verification') >= 0 || html.indexOf('challenge-form') >= 0
+                          || html.indexOf('cf-challenge') >= 0 || html.indexOf('_cf_chl_opt') >= 0;
+                  """)
+                  if is_cf:
+                      log("Cloudflare challenge detected")
+                  log(f"waiting for page content (attempt {attempt + 1}/5)...")
+                  cf_wait = int(adpt_poll.get())
+                  loaded = False
+                  for i in range(cf_wait):
+                      ms(1000)
+                      if "vplink.in" not in safe_url():
+                          loaded = True
+                          break
+                      if safe_eval("return !!document.getElementById('get-link');"):
+                          loaded = True
+                          break
+                      if has_countdown_template():
+                          loaded = True
+                          break
+                  if loaded:
+                      break
+                  if is_cf:
+                      log("Cloudflare not resolved, reloading...")
+                      try:
+                          driver.refresh()
+                          time.sleep(4)
+                      except Exception:
+                          pass
+                  else:
+                      break
+
+              if "vplink.in" in safe_url() and "cdn-cgi" not in safe_url():
+                  has_gl = safe_eval("return !!document.getElementById('get-link');")
+                  if not has_gl:
+                      log("stuck on vplink.in — proxy may be blocking JS redirects")
+                      proxy_blocked = True
+                      if PROXY:
+                          report_proxy_failure("vplink-no-redirect")
+                      skip_main_loop = True
+
+      else:
+          # YouTube nav succeeded — check if we need to wait for redirect from vplink.in
+          if "vplink.in" in safe_url():
+              log("YouTube nav: on vplink.in, waiting for auto-redirect...")
+              for i in range(int(adpt_redirect.get())):
+                  ms(1000)
+                  if "vplink.in" not in safe_url():
+                      break
+              if "vplink.in" not in safe_url():
+                  _left_vplink_at = time.time()
+                  monitor.install(driver)
+              else:
+                  log("YouTube nav: still on vplink.in after redirect wait")
                   proxy_blocked = True
-                  if PROXY:
-                      report_proxy_failure("vplink-no-redirect")
                   skip_main_loop = True
+          else:
+              monitor.install(driver)
 
       # Wait for redirected page to be ready before entering main loop
       if not skip_main_loop and "vplink.in" not in safe_url():

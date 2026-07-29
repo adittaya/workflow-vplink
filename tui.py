@@ -93,19 +93,6 @@ def get_supabase_creds(settings):
         ss = ss or legacy.get("supabase_secret", "")
     return su, sk, ss
 
-def normalize_key(val):
-    """Extract key code from URL or return as-is. Accepts:
-    - 'https://vplink.in/XXXX' → 'XXXX'
-    - 'vplink.in/XXXX' → 'XXXX'
-    - 'XXXX' → 'XXXX'
-    """
-    val = val.strip()
-    if "://" in val:
-        val = val.split("://", 1)[1]
-    if "/" in val:
-        val = val.split("/", 1)[1]
-    return val.strip().rstrip("/")
-
 def validate_repo_name(name):
     """Validate GitHub repo name (alphanumeric, hyphens, underscores only)."""
     return bool(re.match(r'^[a-zA-Z0-9_-]+$', name))
@@ -271,7 +258,7 @@ def set_repo_secret(owner, repo, token, secret_name, secret_value):
 
 # ─── Deploy / Remove ──────────────────────────────────────────────────────────
 
-def deploy_new(repo_name, key, token, username, settings, step_cb=None):
+def deploy_new(repo_name, token, username, settings, step_cb=None, youtube_url=""):
     """Deploy a new VPLink instance. step_cb(step_num, msg) for progress."""
     full_name = repo_name if repo_name.startswith("vplink-") else f"vplink-{repo_name}"
     repo_created = False
@@ -370,10 +357,11 @@ def deploy_new(repo_name, key, token, username, settings, step_cb=None):
     # Set secrets with encryption
     step(6, "Setting encrypted secrets...")
     secrets = {
-        "VPLINK_KEY": key,
         "RELAY_TARGET_REPO": f"{username}/{full_name}",
         "LOOP_TRIGGER_TOKEN": token,
     }
+    if youtube_url:
+        secrets["VPLINK_YOUTUBE_URL"] = youtube_url
     su, sk, ss = get_supabase_creds(settings)
     if su:
         secrets["SUPABASE_URL"] = su
@@ -406,17 +394,22 @@ def deploy_new(repo_name, key, token, username, settings, step_cb=None):
     if wf:
         gh(f"/repos/{username}/{full_name}/actions/workflows/{wf['id']}/enable", token, "PUT")
         step(8, "Dispatching workflow...")
+        inputs = {}
+        if youtube_url:
+            inputs["youtube_url"] = youtube_url
         gh(f"/repos/{username}/{full_name}/actions/workflows/{wf['id']}/dispatches", token, "POST",
-           {"ref": "main", "inputs": {"key": key}})
+           {"ref": "main", "inputs": inputs})
     else:
         step(8, "Warning: no workflow found to enable")
 
     # Save deployment locally
     dep = {
-        "name": full_name, "key": key, "account": username,
+        "name": full_name, "account": username,
         "repo_url": f"https://github.com/{username}/{full_name}",
         "status": "deployed", "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
+    if youtube_url:
+        dep["youtube_url"] = youtube_url
     deps = load_json("deployments.json")
     deps[full_name] = dep
     save_json("deployments.json", deps)
@@ -686,12 +679,11 @@ def screen_deploy():
         input(f"\n  Press Enter to continue...")
         return
     full_name = repo_name if repo_name.startswith("vplink-") else f"vplink-{repo_name}"
-    key = prompt("VPLINK_KEY (raw key or full URL)")
-    if not key:
-        error("VPLINK_KEY is required")
+    youtube_url = prompt("YouTube URL (video with VPLink in comments)")
+    if not youtube_url:
+        error("YouTube URL is required")
         input(f"\n  Press Enter to continue...")
         return
-    key = normalize_key(key)
 
     if not confirm(f"Deploy {full_name} as @{username}?"):
         return
@@ -701,7 +693,7 @@ def screen_deploy():
     def show_step(n, msg):
         print(f"  {C_BOLD}[{n}/{TOTAL}]{C_RESET} {msg}")
 
-    dep, err = deploy_new(repo_name, key, token, username, settings, step_cb=show_step)
+    dep, err = deploy_new(repo_name, token, username, settings, step_cb=show_step, youtube_url=youtube_url)
     print()
     if err:
         error(err)
@@ -968,7 +960,7 @@ def screen_sync():
                     updated_repos.append(rn)
                 else:
                     existing[rn] = {
-                        "name": rn, "key": "?", "account": name,
+                        "name": rn, "account": name,
                         "repo_url": repo["html_url"], "status": status,
                         "destination": dest,
                         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -1031,10 +1023,10 @@ def screen_dispatch():
     repo = repos[idx]
     owner = repo["owner"]["login"]
     rn = repo["name"]
-
-    key = prompt("VPLINK_KEY (leave blank for default, or paste URL)")
-    key = normalize_key(key) if key else ""
-    inputs = {"key": key} if key else {}
+    youtube_url = prompt("YouTube URL (leave blank if none)")
+    inputs = {}
+    if youtube_url:
+        inputs["youtube_url"] = youtube_url
 
     if not confirm(f"Trigger workflow on {rn}?"):
         return
@@ -1066,17 +1058,17 @@ def screen_settings():
         su = settings.get("supabase_url", "")
         sk = settings.get("supabase_key", "")
         ss = settings.get("supabase_secret", "")
-        vk = settings.get("vplink_key", "")
+        yu = settings.get("youtube_url", "")
 
-        print(f"  {C_DIM}Supabase URL:{C_RESET}   {su or f'{C_YELLOW}not set{C_RESET}'}")
-        print(f"  {C_DIM}Supabase Key:{C_RESET}   {sk[:4]}...{sk[-4:] if len(sk) > 4 else ''}" if sk else f"  {C_DIM}Supabase Key:{C_RESET}   {C_YELLOW}not set{C_RESET}")
-        print(f"  {C_DIM}Supabase Secret:{C_RESET} {ss[:4]}...{ss[-4:] if len(ss) > 4 else ''}" if ss else f"  {C_DIM}Supabase Secret:{C_RESET} {C_YELLOW}not set{C_RESET}")
-        print(f"  {C_DIM}VPLINK_KEY:{C_RESET}     {vk or f'{C_YELLOW}not set{C_RESET}'}")
+        print(f"  {C_DIM}Supabase URL:{C_RESET}        {su or f'{C_YELLOW}not set{C_RESET}'}")
+        print(f"  {C_DIM}Supabase Key:{C_RESET}        {sk[:4]}...{sk[-4:] if len(sk) > 4 else ''}" if sk else f"  {C_DIM}Supabase Key:{C_RESET}        {C_YELLOW}not set{C_RESET}")
+        print(f"  {C_DIM}Supabase Secret:{C_RESET}      {ss[:4]}...{ss[-4:] if len(ss) > 4 else ''}" if ss else f"  {C_DIM}Supabase Secret:{C_RESET}      {C_YELLOW}not set{C_RESET}")
+        print(f"  {C_DIM}YouTube URL:{C_RESET}          {yu or f'{C_YELLOW}not set{C_RESET}'}")
         print()
         print(f"  {C_BOLD}[1]{C_RESET} Set Supabase URL")
         print(f"  {C_BOLD}[2]{C_RESET} Set Supabase Key")
         print(f"  {C_BOLD}[3]{C_RESET} Set Supabase Secret")
-        print(f"  {C_BOLD}[4]{C_RESET} Set default VPLINK_KEY")
+        print(f"  {C_BOLD}[4]{C_RESET} Set default YouTube URL")
         print(f"  {C_BOLD}[5]{C_RESET} Clear all settings")
         print(f"  {C_BOLD}[0]{C_RESET} Back\n")
 
@@ -1099,8 +1091,8 @@ def screen_settings():
             save_json("settings.json", settings)
             success("Saved")
         elif choice == "4":
-            val = prompt("Default VPLINK_KEY (raw key or URL)", settings.get("vplink_key"))
-            settings["vplink_key"] = normalize_key(val) if val else val
+            val = prompt("Default YouTube URL", settings.get("youtube_url"))
+            settings["youtube_url"] = val
             save_json("settings.json", settings)
             success("Saved")
         elif choice == "5":
