@@ -2774,26 +2774,20 @@ def navigate_youtube_for_vplink(video_url):
             video_url = f"https://www.youtube.com/watch?v={vid}"
             log(f"Converted to full URL")
 
-    # 1. Switch to desktop viewport for YouTube navigation.
-    #    Mobile YouTube (ytm-) puts comments in a carousel tab that requires
-    #    explicit user interaction. Desktop YouTube shows comments inline.
-    safe_eval("""
-        if (window.chrome && chrome.debugger) {
-            chrome.debugger.sendCommand('Emulation.setDeviceMetricsOverride', {
-                width: 1354, height: 848, deviceScaleFactor: 1,
-                mobile: false
-            });
-        }
-    """)
-    # Also try the CDP approach via execute_cdp_cmd
+    # 1. Switch to desktop viewport + desktop user-agent for YouTube.
+    #    Mobile YouTube hides comments in a carousel tab; desktop shows inline.
     try:
         driver.execute_cdp_cmd('Emulation.setDeviceMetricsOverride', {
             'width': 1354, 'height': 848, 'deviceScaleFactor': 1,
             'mobile': False
         })
-        log("Set desktop viewport for YouTube")
+        driver.execute_cdp_cmd('Network.setUserAgentOverride', {
+            'userAgent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 '
+                         '(KHTML, like Gecko) Chrome/150.0.7871.100 Safari/537.36'
+        })
+        log("Set desktop viewport + UA for YouTube")
     except Exception as e:
-        log(f"Viewport switch failed (non-fatal): {e}")
+        log(f"Viewport/UA switch failed (non-fatal): {e}")
 
     # Navigate to the YouTube video
     try:
