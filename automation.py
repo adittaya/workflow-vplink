@@ -2791,16 +2791,27 @@ def navigate_youtube_for_vplink(video_url):
         log("YouTube page empty — aborting YouTube nav")
         return False
 
-    # Wait for YouTube's JS framework to render the actual page
+    # Wait for YouTube's JS framework to render the actual page.
+    # We use mobile emulation (390x844, mobile UA) so YouTube serves mobile HTML.
+    # Check for both mobile (ytm-) and desktop (ytd-) elements.
+    # The skeleton HTML already contains ytm-watch; we wait for JS-rendered content.
+    skeleton_ok = safe_eval("""
+        return !!document.querySelector('ytm-app, ytd-app');
+    """)
+    log(f"YT skeleton present: {skeleton_ok}")
+
     for _ in range(30):
         rendered = safe_eval("""
-            return document.querySelector('ytd-watch-flexy, ytd-watch, '
-                + '#primary, ytd-page-manager') !== null;
+            return document.querySelector('ytm-comment-section-renderer, '
+                + 'ytm-item-section-renderer, ytd-comments, '
+                + '#comments, ytd-comment-thread-renderer, '
+                + 'ytm-comment-thread-renderer, #comment-section, '
+                + '#content-text') !== null;
         """)
         if rendered:
             break
         ms(1000)
-    log(f"YT framework rendered: {rendered}")
+    log(f"YT comments section rendered: {rendered}")
 
     human_delay(2000, 4000)
 
@@ -2812,21 +2823,17 @@ def navigate_youtube_for_vplink(video_url):
             .forEach(b => b.click());
     """)
     safe_eval("""
-        document.querySelectorAll('ytd-button-renderer a, '
-            + '[aria-label*="Close"], .yt-spec-button-shape-next--icon-only')
+        [...document.querySelectorAll('ytm-button-renderer a, '
+            + 'ytd-button-renderer a, [aria-label*="Close"], '
+            + '.yt-spec-button-shape-next--icon-only')]
             .forEach(b => { try { b.click(); } catch(e) {} });
     """)
 
     # 3. Scroll to comments and find VPLink URL
-    #    CDP recording shows: pause video → click VPLink from comment directly.
-    #    No video watching — we find and click the VPLink URL immediately.
     vplink_url = None
 
-    # Try to find VPLink URL right away (it may be in the initial page data
-    # or already visible without scrolling)
     vplink_url = _find_vplink_in_dom()
 
-    # If not visible, scroll into comments section
     if not vplink_url:
         log("Scrolling to find comment section...")
         for i in range(40):
@@ -2837,7 +2844,6 @@ def navigate_youtube_for_vplink(video_url):
                 log(f"VPLink found at scroll pos {i * 400}: {vplink_url[:60]}")
                 break
 
-    # If still not found, wait for API calls and try page_source
     if not vplink_url:
         ms(3000)
         vplink_url = _find_vplink_in_dom()
