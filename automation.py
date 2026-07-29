@@ -2757,8 +2757,8 @@ def debug_shot(label):
 
 
 def navigate_youtube_for_vplink(video_url):
-    """Navigate to a YouTube video, watch ~60s, find a VPLink URL in
-    the comment section, click it, and land on the VPLink funnel.
+    """Navigate to a YouTube video, find a VPLink URL in the comment
+    section, click it, and land on the VPLink funnel.
 
     Returns True if we successfully navigated away from YouTube onto
     the VPLink funnel (caller should skip direct vplink.in navigation).
@@ -2811,96 +2811,53 @@ def navigate_youtube_for_vplink(video_url):
                 .test((b.textContent||'') + (b.getAttribute('aria-label')||'')))
             .forEach(b => b.click());
     """)
-    # Dismiss sign-in popup channel icon
     safe_eval("""
         document.querySelectorAll('ytd-button-renderer a, '
             + '[aria-label*="Close"], .yt-spec-button-shape-next--icon-only')
             .forEach(b => { try { b.click(); } catch(e) {} });
     """)
 
-    # 3. Mute and play the video
-    safe_eval("""
-        (function() {
-            var v = document.querySelector('video');
-            if (v) { v.muted = true; v.play().catch(function(){}); }
-            var btns = document.querySelectorAll(
-                '.ytp-large-play-button, button[aria-label*="Play"]');
-            for (var i = 0; i < btns.length; i++) btns[i].click();
-        })();
-    """)
-    ms(2000)
-
-    # 4. Watch ~60 seconds — during this time, scroll progressively deeper
-    #    to trigger YouTube's lazy-loaded comments section.
-    #    YouTube uses IntersectionObserver: comments load when scrolled into view.
+    # 3. Scroll to comments and find VPLink URL
+    #    CDP recording shows: pause video → click VPLink from comment directly.
+    #    No video watching — we find and click the VPLink URL immediately.
     vplink_url = None
-    page_height = height
 
-    for sec in range(60):
-        ms(750)
-        # Scatter scroll events throughout the watch period:
-        # early: subtle scrolls; mid: reach past player; late: deep into comments
-        if sec == 5:
-            safe_eval("window.scrollTo(0, 600);")
-        elif sec == 12:
-            safe_eval("window.scrollTo(0, 1600);")
-        elif sec == 20:
-            safe_eval("window.scrollTo(0, 2800);")
-        elif sec == 30:
-            safe_eval("window.scrollTo(0, 4000);")
-        elif sec == 40:
-            safe_eval("window.scrollTo(0, 5500);")
-        elif sec == 50:
-            safe_eval("window.scrollTo(0, 7000);")
+    # Try to find VPLink URL right away (it may be in the initial page data
+    # or already visible without scrolling)
+    vplink_url = _find_vplink_in_dom()
 
-        # Resume playback if paused
-        if sec > 0 and sec % 10 == 0:
-            safe_eval("""
-                var v = document.querySelector('video');
-                if (v && v.paused) { v.muted = true; v.play().catch(function(){}); }
-            """)
-
-        # Every 15 seconds, check for VPLink URL in the DOM
-        if sec > 10 and sec % 15 == 0:
-            found = _find_vplink_in_dom()
-            if found:
-                vplink_url = found
-                log(f"VPLink URL found at {sec}s: {vplink_url[:60]}")
-                break
-
-    # 5. If not found yet, scroll aggressively to very end and re-check
+    # If not visible, scroll into comments section
     if not vplink_url:
-        log("Scrolling aggressively to reach comments...")
+        log("Scrolling to find comment section...")
         for i in range(40):
             safe_eval(f"window.scrollTo(0, {i * 400});")
             ms(200)
-            if i % 5 == 0:
-                found = _find_vplink_in_dom()
-                if found:
-                    vplink_url = found
-                    log(f"VPLink URL found during aggressive scroll: {vplink_url[:60]}")
-                    break
+            vplink_url = _find_vplink_in_dom()
+            if vplink_url:
+                log(f"VPLink found at scroll pos {i * 400}: {vplink_url[:60]}")
+                break
 
-    # 6. If still not found, wait for any pending API calls and try page_source
+    # If still not found, wait for API calls and try page_source
     if not vplink_url:
-        ms(5000)
-        log("Final attempt: scanning full page source HTML...")
-        try:
-            source = driver.page_source
-        except Exception:
-            source = ""
-        if source:
-            import re as _re
-            m = _re.search(r'https?://vplink\.in/[a-zA-Z0-9]+', source)
-            if m:
-                vplink_url = m.group(0)
-                log(f"VPLink found in page_source: {vplink_url[:60]}")
+        ms(3000)
+        vplink_url = _find_vplink_in_dom()
+        if not vplink_url:
+            try:
+                source = driver.page_source
+            except Exception:
+                source = ""
+            if source:
+                import re as _re
+                m = _re.search(r'https?://vplink\.in/[a-zA-Z0-9]+', source)
+                if m:
+                    vplink_url = m.group(0)
+                    log(f"VPLink found in page_source: {vplink_url[:60]}")
 
     if not vplink_url:
         log("No VPLink URL found on YouTube page")
         return False
 
-    # 7. Extract the real VPLink URL from YouTube's redirect wrapper
+    # 4. Extract the real VPLink URL from YouTube's redirect wrapper
     from urllib.parse import urlparse, parse_qs, unquote
     parsed = urlparse(vplink_url)
     if parsed.hostname and 'youtube' in parsed.hostname and 'redirect' in parsed.path:
@@ -2910,7 +2867,7 @@ def navigate_youtube_for_vplink(video_url):
             vplink_url = unquote(actual)
             log(f"Extracted from YouTube redirect: {vplink_url[:60]}")
 
-    # 8. Extract KEY and BASE_DOMAIN from the VPLink URL
+    # 5. Extract KEY and BASE_DOMAIN from the VPLink URL
     parsed_vp = urlparse(vplink_url)
     if parsed_vp.hostname:
         BASE_DOMAIN = parsed_vp.hostname
@@ -2920,7 +2877,7 @@ def navigate_youtube_for_vplink(video_url):
         _current_key = vp_path
         log(f"Set KEY={KEY} BASE_DOMAIN={BASE_DOMAIN} from VPLink URL")
 
-    # 9. Navigate to the VPLink URL
+    # 6. Navigate to the VPLink URL
     try:
         adpt_load.set_page_load(driver)
         nav_start = time.time()
