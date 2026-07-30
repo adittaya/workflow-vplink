@@ -8,16 +8,16 @@
 ## Current State
 
 - **Last updated:** 2026-07-30
-- **Latest local commit:** `d3bfc06` fix: add direct HTTP fetch fallback to extract VPLink redirect URL from vplink.in
+- **Latest local commit:** `3b0b57a` fix: CDP Page.navigate with YouTube referrer + proxy-aware HTTP fetch for vplink redirect extraction
 - **Previous commit:** `bad23ee` fix: use exact YouTube video URL as referrer, not generic youtube.com
-- **Local codebase status:** MODIFIED — recursive shadow DOM walker for finding/closing VPLink elements in closed YouTube shadow roots
+- **Local codebase status:** CLEAN — all changes pushed and verified in CI (#2100, #2101)
 - **Accounts:** main (@adittaya), second (@rtff5665)
-- **CI status:** 4+ runs failing with "still on vplink.in after redirect wait" — Cloudflare Rocket Loader not executing deferred redirect JS in headless Chrome. Fix: extract redirect URL from page_source via `extract_redirect_from_html()` and navigate directly. New: direct HTTP fetch fallback bypasses both Selenium and Cloudflare DOM rewriting.
+- **CI status:** RUNNING — #2100 (400s) and #2101 (430s) both captured destination successfully. HTTP fetch with proxy support extracts redirect URL from vplink.in raw HTML, CDP Page.navigate sets YouTube video URL as referrer. Relay chain continuous.
 - **Hard timeout bumped to 1200s** (20 min) to accommodate 5+ article funnels with slow CE templates.
 - **24/7 relay root cause:** FIXED — relay step condition changed from `if: success() || failure()` to `if: always()`. Job timeout produces `conclusion=cancelled` which `success()||failure()` doesn't cover.
 - **Guard page root cause:** FIXED — when `learn_more.php` redirects to page with no VPLink elements, automation now checks raw HTML for next `learn_more.php` link and follows it instead of force-navigating back to vplink.in.
 - **YouTube nav:** Desktop-only mode. No mobile emulation — YouTube serves `www.youtube.com`. VPLink in **closed shadow DOM** (ytd-comment-view-model → ytd-expander). `querySelectorAll` cannot pierce — uses recursive shadow DOM walker (`deepWalk`) to find VPLink `<a>` via CDP mouse click at coordinates. Fallback `execute_script` click also uses recursive walker. Profiles randomized with desktop viewports/UAs.
-- **Relay chain:** 4+ runs cancelled at 900s — CE btn6 at 647s + remaining steps exceeded old timeout. Hard timeout bumped to 1200s. Latest run pending.
+- **Relay chain:** 4+ runs cancelled at 900s — CE btn6 at 647s + remaining steps exceeded old timeout. Hard timeout bumped to 1200s. Latest runs (#2100, #2101) both successful with destination captured.
 
 ---
 
@@ -80,7 +80,9 @@
 | `b9984bb` | ✅ Success | Click → still on YT → fallback → funnel entered ✅
 | `2e42d68` (run #2041) | ❌ Cancelled (timeout) | Raw VPLink URL fallback fix worked ✅ — VPLink found at 13.8s, funnel entered at 23.4s. Cancelled at 900s due to CE btn6 at 647s + remaining steps. Timeout bumped to 1200s. |
 | `d3bfc06` (run #22444048) | ⏳ PENDING | Direct HTTP fetch fallback for VPLink redirect extraction / recursive shadow DOM walker for finding/clicking VPLink in closed YouTube shadow roots. |
-| *(current)* | MODIFIED | Desktop-only mode, no mobileEmulation. Random mobile profiles for fingerprint. Timeout: 1200s. Recursive shadow DOM walker for VPLink element finding + CDP mouse click. |
+| `519883f` (run #2099) | ✅ Success, destination captured | HTTP fetch worked on this proxy — full funnel 359s |
+| `3b0b57a` (runs #2100, #2101) | ✅ Both success | HTTP fetch with proxy support + CDP Page.navigate with YouTube referrer. Funnels 400s/430s. |
+| *(current)* | CLEAN | All changes pushed and CI-verified. Desktop-only mode, proxy-aware HTTP fetch for redirect extraction, CDP Page.navigate with YouTube referrer. |
 
 ---
 
@@ -313,4 +315,15 @@ Recording: `/home/ubuntu/Documents/Recording 7_24_2026 at 11_21_29 PM.json` (KEY
     restrictions because CDP operates at the browser protocol level.
 234. **Result:** `_find_vplink_element()` now actually finds the VPLink `<a>` in YouTube's closed
     shadow DOM, and the click dispatches at the correct coordinates.
+235-236. **automation.py** — CRITICAL BUG: `deepWalk` textContent search matched `<HTML>` element
+    before recursion into shadow roots. Split href search from textContent — `findVplinkLink()`
+    only searches `<a>` elements by href, avoiding false positives. Click code and fallback
+    `deepWalk2` both updated.
+237-238. **automation.py** — Closed shadow roots (`mode: 'closed'`) are inaccessible via JS
+    `element.shadowRoot`. YouTube uses closed shadow roots, so the recursive walker can't pierce
+    them. Solution: skip clicking entirely — use HTTP fetch (with proxy support) to extract the
+    redirect URL from vplink.in's raw HTML, then CDP `Page.navigate` with YouTube URL as referrer.
+239. **Key insight:** The VPLink click on YouTube is NOT required. The redirect URL from vplink.in
+    can be extracted via HTTP fetch (using the same proxy as Selenium) and navigated to directly
+    with the YouTube video URL as the Referer header via CDP `Page.navigate`.
 
