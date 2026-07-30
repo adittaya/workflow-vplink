@@ -3455,10 +3455,28 @@ def main():
                   has_gl = safe_eval("return !!document.getElementById('get-link');")
                   if not has_gl:
                       log("stuck on vplink.in — proxy may be blocking JS redirects")
-                      proxy_blocked = True
-                      if PROXY:
-                          report_proxy_failure("vplink-no-redirect")
-                      skip_main_loop = True
+                      redirected = False
+                      html = get_raw_html(3000)
+                      redirect_url = extract_redirect_from_html(html)
+                      if redirect_url:
+                          full_url = redirect_url if redirect_url.startswith("http") else f"https://{safe_url().split('/')[2]}{redirect_url}"
+                          log(f"found redirect in vplink.in raw HTML: {full_url[:80]}")
+                          try:
+                              adpt_load.set_page_load(driver)
+                              driver.get(full_url)
+                          except Exception:
+                              adpt_load.timeout_occured()
+                          human_delay(2000, 4000)
+                          if "vplink.in" not in safe_url():
+                              redirected = True
+                              _left_vplink_at = time.time()
+                              monitor.install(driver)
+                              skip_main_loop = False
+                      if not redirected:
+                          proxy_blocked = True
+                          if PROXY:
+                              report_proxy_failure("vplink-no-redirect")
+                          skip_main_loop = True
 
       else:
           # YouTube nav succeeded — check if we need to wait for redirect from vplink.in
@@ -3473,8 +3491,26 @@ def main():
                   monitor.install(driver)
               else:
                   log("YouTube nav: still on vplink.in after redirect wait")
-                  proxy_blocked = True
-                  skip_main_loop = True
+                  redirected = False
+                  html = get_raw_html(3000)
+                  redirect_url = extract_redirect_from_html(html)
+                  if redirect_url:
+                      full_url = redirect_url if redirect_url.startswith("http") else f"https://{safe_url().split('/')[2]}{redirect_url}"
+                      log(f"found redirect in vplink.in raw HTML: {full_url[:80]}")
+                      try:
+                          adpt_load.set_page_load(driver)
+                          driver.get(full_url)
+                      except Exception:
+                          adpt_load.timeout_occured()
+                      human_delay(2000, 4000)
+                      if "vplink.in" not in safe_url():
+                          redirected = True
+                          _left_vplink_at = time.time()
+                          monitor.install(driver)
+                          skip_main_loop = False
+                  if not redirected:
+                      proxy_blocked = True
+                      skip_main_loop = True
           else:
               monitor.install(driver)
 
