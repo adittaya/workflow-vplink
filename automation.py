@@ -3204,6 +3204,31 @@ def navigate_youtube_for_vplink(video_url):
         log("Still on YouTube after all navigation attempts")
         return False
 
+    # ── Early redirect extraction: extract from page_source immediately after landing ──
+    # (Cloudflare Rocket Loader may never execute the deferred redirect JS, and
+    #  the challenge platform may rewrite the page if we wait too long.)
+    if current_url and 'vplink.in' in current_url:
+        try:
+            ps = driver.page_source
+        except Exception:
+            ps = ''
+        if ps:
+            er_url = extract_redirect_from_html(ps)
+            if er_url:
+                full_er = er_url if er_url.startswith("http") else f"https://{safe_url().split('/')[2]}{er_url}"
+                log(f"early redirect from vplink.in page_source: {full_er[:80]}")
+                try:
+                    adpt_load.set_page_load(driver)
+                    driver.get(full_er)
+                except Exception:
+                    pass
+                human_delay(2000, 4000)
+                current_url = safe_url()
+                if current_url and 'vplink.in' not in current_url:
+                    log(f"redirected via early extraction to: {(current_url or '')[:80]}")
+                else:
+                    log("early extraction redirect did not leave vplink.in")
+
     # ── Extract KEY/BASE_DOMAIN from current URL ──
     from urllib.parse import urlparse as _up, parse_qs as _pqs
     import re as _re
