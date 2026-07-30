@@ -2754,7 +2754,8 @@ def _find_vplink_element():
 
     CDP recording (Jul 29, desktop 1354×848):
     - VPLink clicked at ytd-expander a / #content-text > span > span[2] > a
-    - Desktop YT: link in light DOM (no shadow root needed)
+    - Desktop YT: link inside YouTube shadow DOM (ytd-comment-view-model shadow root
+      contains ytd-expander shadow root which contains the <a>).
     - Selectors: ytd-expander a, #content-text span span[2] a, aria/https://vplink.in/...
 
     Returns dict with {element_found, url, tag, text}.
@@ -2784,46 +2785,59 @@ def _find_vplink_element():
 
     el_info = safe_eval("""
         var url = arguments[0];
-        function checkEl(el) {
-            var h = el.href || '';
-            if (h.indexOf('vplink') > -1) return true;
-            if (h.indexOf('/redirect') > -1) {
+        function findVplinkLink(root) {
+            if (!root || !root.querySelectorAll) return null;
+            var links = root.querySelectorAll('a');
+            for (var i = 0; i < links.length; i++) {
+                var h = links[i].href || '';
+                if (h.indexOf('vplink.in') > -1 || h.indexOf('/redirect?q=vplink') > -1)
+                    return links[i];
+            }
+            var byAttr = root.querySelectorAll('a[href*=\"/redirect\"]');
+            for (var i = 0; i < byAttr.length; i++) {
                 try {
-                    var u = new URL(h);
-                    var q = u.searchParams.get('q') || '';
-                    if (q.indexOf('vplink') > -1) return true;
+                    var u = new URL(byAttr[i].href);
+                    if ((u.searchParams.get('q')||'').indexOf('vplink') > -1)
+                        return byAttr[i];
                 } catch(e) {}
             }
-            return false;
+            return null;
         }
-        function checkRoot(root) {
-            if (!root) return null;
-            var links = root.querySelectorAll('a[href*=\"/redirect\"]');
-            for (var i = 0; i < links.length; i++) {
-                if (checkEl(links[i])) return links[i];
-            }
-            var all = root.querySelectorAll('*');
-            for (var i = 0; i < all.length; i++) {
-                var t = all[i].textContent || '';
-                if (t.indexOf('vplink.in') > -1) {
-                    var clickable = all[i].closest('a');
-                    return clickable || all[i];
+        function deepWalk(root, depth) {
+            if (!root || depth > 15) return null;
+            var el = findVplinkLink(root);
+            if (el) return el;
+            if (root.querySelectorAll) {
+                var kids = root.querySelectorAll('*');
+                for (var i = 0; i < kids.length; i++) {
+                    if (kids[i].shadowRoot) {
+                        el = deepWalk(kids[i].shadowRoot, depth + 1);
+                        if (el) return el;
+                    }
                 }
             }
             return null;
         }
-        var sel = 'ytd-expander a, ytd-comment-view-model, ytm-comment-view-model, '
+        // Walk common containers first
+        var containers = document.querySelectorAll(
+            'ytd-comment-view-model, ytm-comment-view-model, '
             + 'ytd-comment-thread-renderer, ytm-comment-thread-renderer, '
-            + '#content-text, ytd-comments, #comments';
-        var containers = document.querySelectorAll(sel);
+            + 'ytd-comments, #comments, ytd-item-section-renderer, ytd-expander, '
+            + 'ytd-app, ytm-app');
         for (var c = 0; c < containers.length; c++) {
-            var el = checkRoot(containers[c]);
+            var el = deepWalk(containers[c], 0);
             if (!el && containers[c].shadowRoot)
-                el = checkRoot(containers[c].shadowRoot);
+                el = deepWalk(containers[c].shadowRoot, 0);
             if (el) {
                 return JSON.stringify({found:true, tag:el.tagName,
                     text:(el.textContent||'').trim().slice(0,100)});
             }
+        }
+        // Last resort: walk entire document (including all shadow roots)
+        var el = deepWalk(document, 0);
+        if (el) {
+            return JSON.stringify({found:true, tag:el.tagName,
+                text:(el.textContent||'').trim().slice(0,100)});
         }
         return JSON.stringify({found:false});
     """, url)
@@ -3088,50 +3102,71 @@ def navigate_youtube_for_vplink(video_url):
         except Exception:
             pass
 
-    # ── CLICK the VPLink element ──
+    # ── CLICK the VPLink element (recursive shadow DOM walker) ──
     clicked = False
     el_href = ''
 
-    el_info = safe_eval("""
+    find_result = safe_eval("""
         var url = arguments[0];
-        var found = null;
-        // Desktop YT: ytd-expander a is the primary selector
-        var expanders = document.querySelectorAll('ytd-expander a');
-        for (var i = 0; i < expanders.length; i++) {
-            var h = expanders[i].href || '';
-            if (h.indexOf('vplink.in') > -1 || h.indexOf(url) > -1) {
-                found = expanders[i]; break;
+        function findVplinkLink(root) {
+            if (!root || !root.querySelectorAll) return null;
+            var links = root.querySelectorAll('a');
+            for (var i = 0; i < links.length; i++) {
+                var h = links[i].href || '';
+                if (h.indexOf('vplink.in') > -1 || h.indexOf('/redirect?q=vplink') > -1 || h.indexOf(url) > -1)
+                    return links[i];
             }
+            var byAttr = root.querySelectorAll('a[href*=\"/redirect\"]');
+            for (var i = 0; i < byAttr.length; i++) {
+                try {
+                    var u = new URL(byAttr[i].href);
+                    if ((u.searchParams.get('q')||'').indexOf('vplink') > -1)
+                        return byAttr[i];
+                } catch(e) {}
+            }
+            var byUrl = root.querySelectorAll('a[href*=\"' + url.replace('https://','') + '\"]');
+            for (var i = 0; i < byUrl.length; i++) {
+                var h = byUrl[i].href || '';
+                if (h.indexOf('vplink.in') > -1 || h.indexOf('/redirect') > -1)
+                    return byUrl[i];
+            }
+            return null;
         }
-        if (!found) {
-            // Fallback: all <a> tags with vplink.in
-            var all = document.querySelectorAll('a');
-            for (var i = 0; i < all.length; i++) {
-                var h = all[i].href || '';
-                if (h.indexOf('vplink.in') > -1 || h.indexOf(url) > -1) {
-                    found = all[i]; break;
+        function deepWalk(root, depth) {
+            if (!root || depth > 15) return null;
+            var el = findVplinkLink(root);
+            if (el) return el;
+            if (root.querySelectorAll) {
+                var kids = root.querySelectorAll('*');
+                for (var i = 0; i < kids.length; i++) {
+                    if (kids[i].shadowRoot) {
+                        el = deepWalk(kids[i].shadowRoot, depth + 1);
+                        if (el) return el;
+                    }
                 }
             }
+            return null;
         }
-        if (found) {
-            found.scrollIntoView({block:'center', behavior:'instant'});
-            var r = found.getBoundingClientRect();
+        var el = deepWalk(document, 0);
+        if (el) {
+            el.scrollIntoView({block:'center', behavior:'instant'});
+            var r = el.getBoundingClientRect();
             return JSON.stringify({
-                found: true, tag: found.tagName,
+                found: true, tag: el.tagName,
                 cx: Math.round(r.left + r.width/2),
                 cy: Math.round(r.top + r.height/2),
-                href: (found.href || '').slice(0,200),
-                text: (found.textContent || '').trim().slice(0,80)
+                href: (el.href || '').slice(0,200),
+                text: (el.textContent || '').trim().slice(0,80)
             });
         }
         return JSON.stringify({found: false});
     """, vplink_url)
 
     ei = None
-    if el_info and el_info != 'null':
+    if find_result and find_result != 'null':
         try:
             import json as _j_ei
-            ei = _j_ei.loads(el_info)
+            ei = _j_ei.loads(find_result)
         except Exception:
             pass
 
@@ -3139,40 +3174,63 @@ def navigate_youtube_for_vplink(video_url):
         cx, cy, el_href = ei.get('cx'), ei.get('cy'), (ei.get('href') or '').strip()
         log(f"VPLink <{ei.get('tag')}> @({cx},{cy}) text={ei.get('text','')[:40]}")
 
-        # CLICK via Selenium execute_script (works on desktop YT — light DOM)
+        # CDP mouse click (works across shadow DOM boundaries)
         try:
-            el_obj = safe_eval("""
-                var url = arguments[0];
-                var el = document.querySelector('ytd-expander a[href*="vplink"]');
-                if (!el) {
-                    var all = document.querySelectorAll('a[href*="vplink"]');
-                    if (all.length > 0) el = all[0];
-                }
-                if (!el) {
-                    var all2 = document.querySelectorAll('a[href*="' + url.replace('https://','') + '"]');
-                    if (all2.length > 0) el = all2[0];
-                }
-                return el;
-            """, vplink_url)
-            if el_obj:
-                driver.execute_script("arguments[0].click();", el_obj)
-                log("VPLink clicked via Selenium")
-                ms(2000)
-            else:
-                # CDP mouse click via coordinates
-                driver.execute_cdp_cmd('Input.dispatchMouseEvent', {
-                    'type': 'mousePressed',
-                    'x': cx, 'y': cy, 'button': 'left', 'clickCount': 1
-                })
-                ms(100)
-                driver.execute_cdp_cmd('Input.dispatchMouseEvent', {
-                    'type': 'mouseReleased',
-                    'x': cx, 'y': cy, 'button': 'left', 'clickCount': 1
-                })
-                log("VPLink clicked via CDP mouse")
-                ms(2000)
+            driver.execute_cdp_cmd('Input.dispatchMouseEvent', {
+                'type': 'mousePressed',
+                'x': cx, 'y': cy, 'button': 'left', 'clickCount': 1
+            })
+            ms(100)
+            driver.execute_cdp_cmd('Input.dispatchMouseEvent', {
+                'type': 'mouseReleased',
+                'x': cx, 'y': cy, 'button': 'left', 'clickCount': 1
+            })
+            log("VPLink clicked via CDP mouse")
+            ms(2000)
         except Exception as ce:
-            log(f"Click failed ({ce})")
+            log(f"CDP click failed ({ce}), trying execute_script")
+            try:
+                el_ref = safe_eval("""
+                    var url = arguments[0];
+                    function findVplinkLink2(root) {
+                        if (!root || !root.querySelectorAll) return null;
+                        var links = root.querySelectorAll('a');
+                        for (var i = 0; i < links.length; i++) {
+                            var h = links[i].href || '';
+                            if (h.indexOf('vplink.in') > -1 || h.indexOf('/redirect?q=vplink') > -1 || h.indexOf(url) > -1)
+                                return links[i];
+                        }
+                        var byAttr = root.querySelectorAll('a[href*=\"/redirect\"]');
+                        for (var i = 0; i < byAttr.length; i++) {
+                            try {
+                                var u = new URL(byAttr[i].href);
+                                if ((u.searchParams.get('q')||'').indexOf('vplink') > -1)
+                                    return byAttr[i];
+                            } catch(e) {}
+                        }
+                        return null;
+                    }
+                    function deepWalk2(root, depth) {
+                        if (!root || depth > 15) return null;
+                        var el = findVplinkLink2(root);
+                        if (el) return el;
+                        var kids = root.querySelectorAll ? root.querySelectorAll('*') : [];
+                        for (var i = 0; i < kids.length; i++) {
+                            if (kids[i].shadowRoot) {
+                                el = deepWalk2(kids[i].shadowRoot, depth + 1);
+                                if (el) return el;
+                            }
+                        }
+                        return null;
+                    }
+                    return deepWalk2(document, 0);
+                """, vplink_url)
+                if el_ref:
+                    driver.execute_script("arguments[0].click();", el_ref)
+                    log("VPLink clicked via execute_script")
+                    ms(2000)
+            except Exception as ce2:
+                log(f"execute_script click also failed ({ce2})")
     else:
         log("VPLink element not found for click")
         el_href = vplink_url
@@ -3220,21 +3278,38 @@ def navigate_youtube_for_vplink(video_url):
             try:
                 import urllib.request as _ur
                 req = _ur.Request(current_url, headers={'User-Agent': 'Mozilla/5.0'})
-                with _ur.urlopen(req, timeout=10) as resp:
-                    raw = resp.read().decode('utf-8', errors='replace')
+                proxy_val = os.environ.get('VPLINK_PROXY', '')
+                if proxy_val:
+                    proxy_parsed = proxy_val.replace('http://', '').replace('https://', '').split('@')[-1]
+                    proxy_handler = _ur.ProxyHandler({'http': proxy_val, 'https': proxy_val})
+                    opener = _ur.build_opener(proxy_handler)
+                    with opener.open(req, timeout=15) as resp:
+                        raw = resp.read().decode('utf-8', errors='replace')
+                else:
+                    with _ur.urlopen(req, timeout=15) as resp:
+                        raw = resp.read().decode('utf-8', errors='replace')
                 er_url = extract_redirect_from_html(raw)
                 if er_url:
-                    log("redirect found via direct HTTP fetch")
-            except Exception:
-                pass
+                    log(f"redirect found via HTTP fetch (proxy={bool(proxy_val)})")
+                else:
+                    log(f"HTTP fetch got {len(raw)} bytes, no redirect pattern")
+            except Exception as e_http:
+                log(f"HTTP fetch failed: {e_http}")
         if er_url:
             full_er = er_url if er_url.startswith("http") else f"https://{safe_url().split('/')[2]}{er_url}"
             log(f"early redirect from vplink.in: {full_er[:80]}")
             try:
-                adpt_load.set_page_load(driver)
-                driver.get(full_er)
+                # Use CDP Page.navigate with YouTube URL as referrer
+                nav_params = {'url': full_er}
+                if video_url and 'youtu' in video_url:
+                    nav_params['referrer'] = video_url
+                driver.execute_cdp_cmd('Page.navigate', nav_params)
             except Exception:
-                pass
+                try:
+                    adpt_load.set_page_load(driver)
+                    driver.get(full_er)
+                except Exception:
+                    pass
             human_delay(2000, 4000)
             current_url = safe_url()
             if current_url and 'vplink.in' not in current_url:
