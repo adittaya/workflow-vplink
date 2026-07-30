@@ -2657,7 +2657,8 @@ def _create_driver():
     options.add_argument("--disable-automation")
     options.add_argument("--use-gl=swiftshader")
     options.add_argument("--disable-features=IsolateOrigins,site-per-process")
-    options.add_argument("--window-size=390,844")
+    vp = profile["viewport"]
+    options.add_argument(f"--window-size={vp['width']},{vp['height']}")
 
     is_termux = os.environ.get("VPLINK_TERMUX") == "1"
     headless = is_termux or os.environ.get("VPLINK_HEADLESS") == "1"
@@ -2681,17 +2682,6 @@ def _create_driver():
         for arg in extra_args.split():
             options.add_argument(arg)
 
-    vp = profile["viewport"]
-    mobile_emu = {
-        "deviceMetrics": {
-            "width": vp["width"],
-            "height": vp["height"],
-            "deviceScaleFactor": profile.get("deviceScaleFactor", 1),
-            "mobile": True,
-        },
-        "userAgent": profile["userAgent"],
-    }
-    options.add_experimental_option("mobileEmulation", mobile_emu)
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
     options.add_argument(f"--user-agent={profile['userAgent']}")
@@ -2932,8 +2922,7 @@ def navigate_youtube_for_vplink(video_url):
     if not app:
         log("YT framework not detected")
         return False
-    app_tag = safe_eval("return (document.querySelector('ytd-app') ? 'ytd' : 'ytm');")
-    log(f"YouTube loaded ({app_tag}), h={height}")
+    log(f"YouTube loaded (desktop), h={height}")
 
     human_delay(2000, 4000)
 
@@ -2959,42 +2948,11 @@ def navigate_youtube_for_vplink(video_url):
     log(f"Video pause: {pause_btn}")
     ms(1000)
 
-    # ── Mobile (ytm): expand comment carousel ──
-    is_mobile = (app_tag == 'ytm')
-    if is_mobile:
-        log("Mobile YouTube — expanding comment carousel")
-        safe_eval("""
-            (function() {
-                var tap = document.querySelector('[aria-label*="comment" i]');
-                if (!tap) {
-                    var btns = document.querySelectorAll('button, [role="tab"], [role="button"]');
-                    for (var i = 0; i < btns.length; i++) {
-                        if (/^Comments\\b/.test(btns[i].textContent.trim())
-                            && btns[i].offsetParent !== null) {
-                            tap = btns[i]; break;
-                        }
-                    }
-                }
-                if (!tap) {
-                    var c = document.querySelector('ytm-video-metadata-carousel');
-                    if (c && c.firstElementChild && c.firstElementChild.offsetParent !== null)
-                        tap = c.firstElementChild;
-                }
-                if (tap) {
-                    tap.click();
-                    tap.dispatchEvent(new MouseEvent('click', {bubbles: true}));
-                }
-            })();
-        """)
-        ms(3000)
-
     # ── Scroll to comments ──
     log("Scrolling to comments...")
     safe_eval("""
         (function() {
-            var sel = '#comments, ytd-comments, ytm-comment-section-renderer, '
-                + 'ytd-comment-thread-renderer, ytm-comment-thread-renderer, '
-                + 'ytm-item-section-renderer, #sections';
+            var sel = '#comments, ytd-comments, ytd-comment-thread-renderer, #sections';
             var el = document.querySelector(sel);
             if (el) { el.scrollIntoView({block:'start', behavior:'instant'});
                 return el.tagName + '#' + (el.id||''); }
@@ -3009,8 +2967,7 @@ def navigate_youtube_for_vplink(video_url):
     for w in range(25):
         has_threads = safe_eval("""
             return document.querySelectorAll('#content-text, ytd-comment-renderer, '
-                + 'ytm-comment-renderer, ytd-comment-thread-renderer, '
-                + 'ytm-comment-thread-renderer').length > 0;
+                + 'ytd-comment-thread-renderer').length > 0;
         """)
         if has_threads:
             log(f"Comments loaded at {w+1}s")
@@ -3065,29 +3022,6 @@ def navigate_youtube_for_vplink(video_url):
 
     el_info = safe_eval("""
         var url = arguments[0];
-        var qa = function(root, fn) {
-            if (!root) return null;
-            var all = root.querySelectorAll('a');
-            for (var i = 0; i < all.length; i++) {
-                var h = all[i].href || '';
-                if (h.indexOf('vplink.in') > -1 || h.indexOf(url) > -1) {
-                    return fn(all[i]);
-                }
-                if (h.indexOf('/redirect') > -1 && h.indexOf('vplink') > -1) {
-                    return fn(all[i]);
-                }
-            }
-            var txt = root.querySelectorAll('*');
-            for (var i = 0; i < txt.length; i++) {
-                var t = txt[i].textContent || '';
-                if (t.indexOf('vplink.in') > -1) {
-                    var cl = txt[i].closest('a');
-                    if (cl) return fn(cl);
-                    return fn(txt[i]);
-                }
-            }
-            return null;
-        };
         var found = null;
         // Desktop YT: ytd-expander a is the primary selector
         var expanders = document.querySelectorAll('ytd-expander a');
@@ -3098,19 +3032,7 @@ def navigate_youtube_for_vplink(video_url):
             }
         }
         if (!found) {
-            // Broader desktop search
-            var containers = document.querySelectorAll(
-                'ytd-comment-view-model, ytm-comment-view-model, #content-text, '
-                + 'ytd-comment-thread-renderer');
-            for (var c = 0; c < containers.length; c++) {
-                found = qa(containers[c], function(el) { return el; });
-                if (!found && containers[c].shadowRoot)
-                    found = qa(containers[c].shadowRoot, function(el) { return el; });
-                if (found) break;
-            }
-        }
-        if (!found) {
-            // Full page text search
+            // Fallback: all <a> tags with vplink.in
             var all = document.querySelectorAll('a');
             for (var i = 0; i < all.length; i++) {
                 var h = all[i].href || '';

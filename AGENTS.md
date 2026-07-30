@@ -16,7 +16,7 @@
 - **Hard timeout bumped to 1200s** (20 min) to accommodate 5+ article funnels with slow CE templates.
 - **24/7 relay root cause:** FIXED — relay step condition changed from `if: success() || failure()` to `if: always()`. Job timeout produces `conclusion=cancelled` which `success()||failure()` doesn't cover.
 - **Guard page root cause:** FIXED — when `learn_more.php` redirects to page with no VPLink elements, automation now checks raw HTML for next `learn_more.php` link and follows it instead of force-navigating back to vplink.in.
-- **YouTube nav root cause:** FIXED — VPLink URL was in `yt-attributed-string` shadow DOM. Targeted traversal of `ytd-comment-view-model.shadowRoot` ($`a[href*="/redirect"]` with `q=vplink`) finds the element. Click dispatched but mobile YT doesn't navigate away → `driver.get()` fallback.
+- **YouTube nav:** Desktop-only mode. No mobile emulation — YouTube serves `www.youtube.com`. VPLink in light DOM via `ytd-expander a`, click works directly. Profiles randomized with desktop viewports/UAs.
 
 ---
 
@@ -48,28 +48,21 @@
 
 ---
 
-## YouTube Navigation System (`navigate_youtube_for_vplink`, line 2811)
+## YouTube Navigation System (`navigate_youtube_for_vplink`, line 2877)
 
-**Purpose:** Navigate YouTube (desktop preferred), find VPLink element in comments (light DOM), CLICK it, fall back to `driver.get()` if click doesn't navigate away.
+**Purpose:** Navigate YouTube (desktop mode), find VPLink element in comments (light DOM), CLICK it, fall through to `driver.get()` if click doesn't navigate away.
 
 **CDP-verified flow (Recording 7/29, 1354×848 desktop, key=UIx1EO):**
-1. `driver.get(video_url)` → detect ytd-app (desktop YouTube, `www.youtube.com`)
-2. **Click Pause** (`div.ytp-left-controls > button`) — pause video before interacting with comments
+1. `driver.get(video_url)` → `www.youtube.com` (desktop, no mobile emulation)
+2. **Click Pause** (`div.ytp-left-controls > button`)
 3. Scroll `#comments` / `ytd-comments` into view
-4. Wait for `#content-text` / `ytd-comment-view-model` to appear
-5. `_find_vplink_element()` — **Python `page_source` regex** + **targeted `ytd-expander a` search**:
-   - Desktop YouTube: VPLink `<a>` is in **light DOM** with `href="https://vplink.in/KEY"` — no shadow root or `/redirect` wrapper
-   - Primary selector: `ytd-expander a[href*="vplink"]`
-   - Falls back to `ytd-comment-view-model` / `#content-text` container search
-   - Returns `{element_found, url, tag, text}` as JSON
-6. **CLICK** via Selenium `execute_script("arguments[0].click()")` — desktop YT click navigates directly to VPLink
-7. Check if navigated away from YouTube (wait 3s, check `safe_url()`)
-8. If still on YouTube → **`driver.get(vplink_url)`** fallback
-9. Extract KEY/BASE_DOMAIN from current URL after navigation
+4. Wait for `#content-text` to appear
+5. `_find_vplink_element()` — `ytd-expander a` primary selector (light DOM)
+6. **CLICK** via Selenium `execute_script("arguments[0].click()")`
+7. Check if navigated away; if not → `driver.get(vplink_url)` fallback
+8. Extract KEY/BASE_DOMAIN from current URL
 
-**Desktop vs Mobile YouTube differences:**
-- Desktop (`www.youtube.com`): VPLink in light DOM via `ytd-expander a` — click works directly
-- Mobile (`m.youtube.com`): VPLink in shadow DOM of `ytm-comment-view-model` with `/redirect?q=` wrapper — click needs CDP fallback
+**Desktop-only mode:** No mobile emulation — YouTube serves `www.youtube.com`. VPLink in light DOM via `ytd-expander a`, click works directly. Profiles use random mobile UAs/viewports for fingerprinting.
 
 **Integration in `main()` (line 3160):**
 - Env var: `VPLINK_YOUTUBE_URL` (full YouTube video URL)
@@ -85,7 +78,7 @@
 | `21fddbf` | ✅ Element found + clicked, but stayed on YT | `element_found: true` via shadow DOM search, `VPLink click: clicked` but mobile YT click doesn't navigate away |
 | `b9984bb` | ✅ Success | Click → still on YT → fallback → funnel entered ✅
 | `2e42d68` (run #2041) | ❌ Cancelled (timeout) | Raw VPLink URL fallback fix worked ✅ — VPLink found at 13.8s, funnel entered at 23.4s. Cancelled at 900s due to CE btn6 at 647s + remaining steps. Timeout bumped to 1200s. |
-| *(current)* | MODIFIED | Timeout bumped to 1200s for long funnels (5+ articles with slow CE). |
+| *(current)* | MODIFIED | Desktop-only mode, no mobileEmulation. Random mobile profiles for fingerprint. Timeout: 1200s. |
 
 ---
 
@@ -270,3 +263,5 @@ Recording: `/home/ubuntu/Documents/Recording 7_24_2026 at 11_21_29 PM.json` (KEY
    - Desktop YT click navigates directly (no mobile-style `/redirect` interception)
    - Mobile (ytm) carousel expansion kept as fallback for m.youtube.com
 226. **AGENTS.md** — Updated Current State, CI table, YouTube nav section, CDP analysis section, Phase 20 entry
+227-228. **automation.py** — Desktop-only rewrite: removed mobileEmulation, removed ytm/shadow DOM code paths. `mobile=True` in profile keeps mobile UAs/viewports for fingerprint, but Chrome runs in desktop mode. YT nav simplified to desktop-only flow.
+229. **AGENTS.md** — Updated YouTube nav section, CI table, Phase 20 entry
