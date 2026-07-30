@@ -3004,8 +3004,8 @@ def navigate_youtube_for_vplink(video_url):
     # ── Desktop YT didn't find VPLink — try mobile YT fallback ──
     if not vplink_url and 'youtu' in (safe_url() or ''):
         log("VPLink not found on desktop YT — falling back to mobile YT")
-        from urllib.parse import urlparse
-        vid = urlparse(video_url).path.lstrip('/').split('?')[0].split('#')[0]
+        from urllib.parse import urlparse, parse_qs
+        vid = parse_qs(urlparse(video_url).query).get('v', [''])[0] or urlparse(video_url).path.lstrip('/').split('?')[0].split('#')[0]
         if vid:
             mobile_url = f"https://m.youtube.com/watch?v={vid}"
             log(f"Mobile YT fallback: {mobile_url[:80]}")
