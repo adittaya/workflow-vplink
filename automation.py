@@ -150,6 +150,16 @@ def _inject_traffic_source():
         pass
 
 
+def _video_id_from_url(url):
+    if not url or 'youtu' not in url:
+        return ''
+    from urllib.parse import urlparse, parse_qs
+    parsed = urlparse(url)
+    if 'youtu.be' in parsed.netloc:
+        return parsed.path.lstrip('/').split('?')[0].split('#')[0]
+    return parse_qs(parsed.query).get('v', [''])[0]
+
+
 def _add_utm_to_url(url):
     if TRAFFIC_SOURCE not in TRAFFIC_UTM or not TRAFFIC_UTM[TRAFFIC_SOURCE]:
         return url
@@ -158,7 +168,11 @@ def _add_utm_to_url(url):
     from urllib.parse import urlparse, urlencode, parse_qs, urlunparse
     parsed = urlparse(url)
     params = parse_qs(parsed.query)
-    utm = TRAFFIC_UTM[TRAFFIC_SOURCE]
+    utm = dict(TRAFFIC_UTM[TRAFFIC_SOURCE])
+    youtube_url = os.environ.get("VPLINK_YOUTUBE_URL", "")
+    vid = _video_id_from_url(youtube_url)
+    if vid:
+        utm['utm_campaign'] = f"{utm.get('utm_campaign', 'referral')}_{vid}"
     for k, v in utm.items():
         if k not in params:
             params[k] = [v]
