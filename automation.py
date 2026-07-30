@@ -3187,7 +3187,11 @@ def navigate_youtube_for_vplink(video_url):
     current = safe_url() or ''
     if 'youtube' in current:
         log("Click didn't navigate away — using driver.get() fallback")
-        nav_url = el_href or vplink_url
+        # On mobile YT, el_href is YouTube /redirect URL — use raw vplink_url instead
+        if 'youtube.com/redirect' in (el_href or ''):
+            nav_url = vplink_url
+        else:
+            nav_url = el_href or vplink_url
         log(f"Navigating via driver.get() to: {nav_url[:120]}")
         try:
             adpt_load.set_page_load(driver)
