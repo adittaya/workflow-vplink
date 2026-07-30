@@ -3000,6 +3000,38 @@ def navigate_youtube_for_vplink(video_url):
     vplink_url = vp.get('url', '')
     if not vplink_url:
         log("No VPLink URL found in page")
+
+    # ── Desktop YT didn't find VPLink — try mobile YT fallback ──
+    if not vplink_url and 'youtu' in (safe_url() or ''):
+        log("VPLink not found on desktop YT — falling back to mobile YT")
+        from urllib.parse import urlparse
+        vid = urlparse(video_url).path.lstrip('/').split('?')[0].split('#')[0]
+        if vid:
+            mobile_url = f"https://m.youtube.com/watch?v={vid}"
+            log(f"Mobile YT fallback: {mobile_url[:80]}")
+            try:
+                adpt_load.set_page_load(driver)
+                ns = time.time()
+                driver.get(mobile_url)
+                adpt_nav.observe(time.time() - ns)
+            except Exception as e:
+                log(f"Mobile YT nav failed: {e}")
+                return False
+            human_delay(3000, 5000)
+            vplink_result = _find_vplink_element()
+            log(f"Mobile VPLink search: {vplink_result[:150] if vplink_result else 'None'}")
+            if vplink_result and vplink_result != 'null':
+                try:
+                    import json as _json2
+                    vp = _json2.loads(vplink_result)
+                except Exception:
+                    vp = {}
+            else:
+                vp = {}
+            vplink_url = vp.get('url', '')
+
+    if not vplink_url:
+        log("No VPLink URL found after all attempts")
         return False
 
     log(f"VPLink URL: {vplink_url[:80]}")
@@ -3102,45 +3134,8 @@ def navigate_youtube_for_vplink(video_url):
         except Exception as ce:
             log(f"Click failed ({ce})")
     else:
-        # ── Desktop YT failed — try mobile YT fallback ──
-        if 'youtu' in (safe_url() or ''):
-            log("VPLink not found on desktop YT — falling back to mobile YT")
-            from urllib.parse import urlparse
-            vid = urlparse(video_url).path.lstrip('/').split('?')[0].split('#')[0]
-            if vid:
-                mobile_url = f"https://m.youtube.com/watch?v={vid}"
-                log(f"Mobile YT fallback: {mobile_url[:80]}")
-                try:
-                    adpt_load.set_page_load(driver)
-                    ns = time.time()
-                    driver.get(mobile_url)
-                    adpt_nav.observe(time.time() - ns)
-                except Exception as e:
-                    log(f"Mobile YT nav failed: {e}")
-                    el_href = vplink_url
-                    return False
-                ms(3000)
-                el_info = _find_vplink_element()
-                ei = None
-                try:
-                    import json as _j_ei2
-                    ei = _j_ei2.loads(el_info)
-                except Exception:
-                    pass
-                if ei and ei.get('found'):
-                    cx, cy, el_href = ei.get('cx'), ei.get('cy'), (ei.get('href') or '').strip()
-                    log(f"Mobile VPLink <{ei.get('tag')}> @({cx},{cy}) text={ei.get('text','')[:40]}")
-                    try:
-                        el_obj = safe_eval("return document.querySelector('a[href*=\"vplink\"]');")
-                        if el_obj:
-                            driver.execute_script("arguments[0].click();", el_obj)
-                            log("Mobile VPLink clicked")
-                            ms(2000)
-                    except Exception as ce:
-                        log(f"Mobile click failed ({ce})")
-        if not el_href:
-            log("VPLink element not found for click")
-            el_href = vplink_url
+        log("VPLink element not found for click")
+        el_href = vplink_url
 
     # ── Check if navigation left YouTube ──
     current = safe_url() or ''
