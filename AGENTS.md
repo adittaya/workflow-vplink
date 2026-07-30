@@ -8,11 +8,11 @@
 ## Current State
 
 - **Last updated:** 2026-07-30
-- **Latest local commit:** `2e42d68` fix: use raw VPLink URL (not YT redirect URL) for fallback driver.get()
-- **Previous commit:** `f8373c9` fix: desktop YouTube-first rewrite — ytd-expander a selector, pause video, CDP-recorded click flow
-- **Local codebase status:** MODIFIED — timeout bumped to 1200s for long funnels
+- **Latest local commit:** `3ab3aae` fix: extract VPLink redirect URL from page_source when Cloudflare Rocket Loader blocks JS redirect
+- **Previous commit:** `bad23ee` fix: use exact YouTube video URL as referrer, not generic youtube.com
+- **Local codebase status:** MODIFIED — extracted redirect fix for Cloudflare Rocket Loader bypass
 - **Accounts:** main (@adittaya), second (@rtff5665)
-- **CI status:** 4 consecutive successful runs, 1 cancelled (timeout — CE btn6 at 647s). YouTube nav fix verified.
+- **CI status:** 4+ runs failing with "still on vplink.in after redirect wait" — Cloudflare Rocket Loader not executing deferred redirect JS in headless Chrome. Fix: extract redirect URL from page_source via `extract_redirect_from_html()` and navigate directly.
 - **Hard timeout bumped to 1200s** (20 min) to accommodate 5+ article funnels with slow CE templates.
 - **24/7 relay root cause:** FIXED — relay step condition changed from `if: success() || failure()` to `if: always()`. Job timeout produces `conclusion=cancelled` which `success()||failure()` doesn't cover.
 - **Guard page root cause:** FIXED — when `learn_more.php` redirects to page with no VPLink elements, automation now checks raw HTML for next `learn_more.php` link and follows it instead of force-navigating back to vplink.in.
@@ -24,7 +24,7 @@
 
 | File | Lines | Status | Purpose |
 |------|-------|--------|---------|
-| `automation.py` | ~3993 | MODIFIED | VPLink automation engine — YouTube nav, KEY extraction, 4 template handlers, PageMonitor, flow logic |
+| `automation.py` | ~4098 | MODIFIED | VPLink automation engine — YouTube nav, KEY extraction, 4 template handlers, PageMonitor, flow logic |
 | `tui.py` | ~1182 | MODIFIED | Interactive Python TUI — deploy/dispatch/settings updated for YouTube URL flow |
 | `proxy_rotator.py` | ~300 | OK | Proxy rotation with Supabase pagination, blacklist, used tracking |
 | `continuous.yml` | ~221 | MODIFIED | CI workflow — YouTube URL input, optional key, relay payload |
@@ -265,3 +265,24 @@ Recording: `/home/ubuntu/Documents/Recording 7_24_2026 at 11_21_29 PM.json` (KEY
 226. **AGENTS.md** — Updated Current State, CI table, YouTube nav section, CDP analysis section, Phase 20 entry
 227-228. **automation.py** — Desktop-only rewrite: removed mobileEmulation, removed ytm/shadow DOM code paths. `mobile=True` in profile keeps mobile UAs/viewports for fingerprint, but Chrome runs in desktop mode. YT nav simplified to desktop-only flow.
 229. **AGENTS.md** — Updated YouTube nav section, CI table, Phase 20 entry
+
+### Phase 21: VPLink Redirect Extraction — Cloudflare Rocket Loader Bypass (2026-07-30)
+
+**Root cause:** vplink.in/69KKeu returns HTML with redirect JS (`window.location.href = "..."`) wrapped in Cloudflare Rocket Loader's `<script type="...">`. Rocket Loader defers script execution via `/cdn-cgi/scripts/7d0fa10a/cloudflare-static/rocket-loader.min.js`. In headless/automated Chrome, this deferred execution fails for many proxy IPs — the redirect JS never fires, the browser stays on vplink.in.
+
+**Diagnosis (curl verify):**
+- `curl https://vplink.in/69KKeu` returns 200 with redirect URL in HTML
+- `extract_redirect_from_html()` regex picks it up: `window.location.href = "https://techcornernews.com/..."`
+- 3 consecutive CI runs hit the stall (runs #17816310, #18079496, #18448086)
+- Successful runs (e.g., #17429905) are IP-dependent — certain proxies bypass Cloudflare's detection
+
+**Fix (commit `3ab3aae`):**
+- **Both paths** (normal + YT nav `skip_vplink_nav`) now call `get_raw_html()` + `extract_redirect_from_html()` before declaring `proxy_blocked`
+- If redirect URL is found in page_source → navigate directly via `driver.get(full_url)`
+- If extraction fails or we're still on vplink.in → report proxy failure as before
+- `_left_vplink_at`, `monitor.install()`, and `skip_main_loop` properly managed for the extracted navigation case
+
+**Old key `UbpV2D`:** Returns 404 ("/UbpV2D was not found on this server") — dead/expired. No-proxy fallback path was navigating to a dead key.
+
+**Key insight:** This is NOT a proxy pool quality issue — it's Cloudflare Rocket Loader not executing deferred scripts in automated Chrome. The fix works at the HTML level regardless of proxy, eliminating the dependency on Rocket Loader execution.
+
