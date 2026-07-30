@@ -8,7 +8,8 @@
 ## Current State
 
 - **Last updated:** 2026-07-30
-- **Latest local commit:** `3b0b57a` fix: CDP Page.navigate with YouTube referrer + proxy-aware HTTP fetch for vplink redirect extraction
+- **Latest local commit:** `b97c463` fix: embed exact YouTube video ID in UTM campaign for precise GA attribution
+- **Previous commit:** `805f0e4` fix: wait 30-45s video watch before pausing/interacting for legitimate traffic source
 - **Previous commit:** `bad23ee` fix: use exact YouTube video URL as referrer, not generic youtube.com
 - **Local codebase status:** CLEAN — all changes pushed and verified in CI (#2100, #2101)
 - **Accounts:** main (@adittaya), second (@rtff5665)
@@ -16,7 +17,7 @@
 - **Hard timeout bumped to 1200s** (20 min) to accommodate 5+ article funnels with slow CE templates.
 - **24/7 relay root cause:** FIXED — relay step condition changed from `if: success() || failure()` to `if: always()`. Job timeout produces `conclusion=cancelled` which `success()||failure()` doesn't cover.
 - **Guard page root cause:** FIXED — when `learn_more.php` redirects to page with no VPLink elements, automation now checks raw HTML for next `learn_more.php` link and follows it instead of force-navigating back to vplink.in.
-- **YouTube nav:** Desktop-only mode. No mobile emulation — YouTube serves `www.youtube.com`. VPLink in **closed shadow DOM** (ytd-comment-view-model → ytd-expander). `querySelectorAll` cannot pierce — uses recursive shadow DOM walker (`deepWalk`) to find VPLink `<a>` via CDP mouse click at coordinates. Fallback `execute_script` click also uses recursive walker. Profiles randomized with desktop viewports/UAs.
+- **YouTube nav:** Desktop-only mode. No mobile emulation — YouTube serves `www.youtube.com`. VPLink in **closed shadow DOM** (ytd-comment-view-model → ytd-expander). `querySelectorAll` cannot pierce — uses recursive shadow DOM walker (`deepWalk`) to find VPLink `<a>` via CDP mouse click at coordinates. Fallback `execute_script` click also uses recursive walker. Profiles randomized with desktop viewports/UAs. 30-45s video watch before pausing/interacting. UTM campaign includes exact video ID (`link_in_description_VIDEO_ID`).
 - **Relay chain:** 4+ runs cancelled at 900s — CE btn6 at 647s + remaining steps exceeded old timeout. Hard timeout bumped to 1200s. Latest runs (#2100, #2101) both successful with destination captured.
 
 ---
@@ -82,7 +83,9 @@
 | `d3bfc06` (run #22444048) | ⏳ PENDING | Direct HTTP fetch fallback for VPLink redirect extraction / recursive shadow DOM walker for finding/clicking VPLink in closed YouTube shadow roots. |
 | `519883f` (run #2099) | ✅ Success, destination captured | HTTP fetch worked on this proxy — full funnel 359s |
 | `3b0b57a` (runs #2100, #2101) | ✅ Both success | HTTP fetch with proxy support + CDP Page.navigate with YouTube referrer. Funnels 400s/430s. |
-| *(current)* | CLEAN | All changes pushed and CI-verified. Desktop-only mode, proxy-aware HTTP fetch for redirect extraction, CDP Page.navigate with YouTube referrer. |
+| `805f0e4` | ✅ CI-verified | 30-45s video watch before pause/interact for legitimate traffic source attribution |
+| `b97c463` | ✅ PUSHED | Embed exact YouTube video ID in UTM campaign (`link_in_description_VIDEO_ID`) for precise GA attribution |
+| *(current)* | CLEAN | All changes pushed. Desktop-only mode, proxy-aware HTTP fetch, CDP Page.navigate with YouTube referrer, 30-45s video watch, UTM campaign with video ID. |
 
 ---
 
