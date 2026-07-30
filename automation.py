@@ -3017,7 +3017,45 @@ def navigate_youtube_for_vplink(video_url):
             except Exception as e:
                 log(f"Mobile YT nav failed: {e}")
                 return False
-            human_delay(3000, 5000)
+            # ── Mobile YT: expand comment carousel + scroll + wait ──
+            safe_eval("""
+                (function() {
+                    var tap = document.querySelector('[aria-label*="comment" i]');
+                    if (!tap) {
+                        var btns = document.querySelectorAll('button, [role="tab"], [role="button"]');
+                        for (var i = 0; i < btns.length; i++) {
+                            if ((btns[i].textContent||'').trim().indexOf('Comments') === 0
+                                && btns[i].offsetParent !== null) {
+                                tap = btns[i]; break;
+                            }
+                        }
+                    }
+                    if (!tap) {
+                        var c = document.querySelector('ytm-video-metadata-carousel');
+                        if (c && c.firstElementChild && c.firstElementChild.offsetParent !== null)
+                            tap = c.firstElementChild;
+                    }
+                    if (tap) {
+                        tap.click();
+                        tap.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+                    }
+                })();
+            """)
+            ms(3000)
+            safe_eval("""
+                (function() {
+                    var sel = '#comments, ytm-comment-section-renderer, ytm-item-section-renderer, #sections';
+                    var el = document.querySelector(sel);
+                    if (el) { el.scrollIntoView({block:'start', behavior:'instant'}); return; }
+                    window.scrollTo(0, window.innerHeight * 0.65);
+                })();
+            """)
+            for _w in range(20):
+                if safe_eval("return document.querySelectorAll('#content-text').length > 0;"):
+                    log(f"Mobile comments loaded at {_w+1}s")
+                    break
+                ms(1000)
+            ms(2000)
             vplink_result = _find_vplink_element()
             log(f"Mobile VPLink search: {vplink_result[:150] if vplink_result else 'None'}")
             if vplink_result and vplink_result != 'null':
