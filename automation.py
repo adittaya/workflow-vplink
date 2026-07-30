@@ -2953,6 +2953,17 @@ def navigate_youtube_for_vplink(video_url):
             .forEach(b => { try { b.click(); } catch(e) {} });
     """)
 
+    # ── Watch the video 30-45s for legitimate traffic source ──
+    watch_sec = random.randint(30, 45)
+    log(f"Watching video for {watch_sec}s...")
+    for _ in range(watch_sec):
+        ms(1000)
+        if safe_eval("""
+            var pb = document.querySelector('div.ytp-left-controls > button');
+            return pb && pb.offsetParent !== null ? true : false;
+        """):
+            pass  # video is playing
+
     # ── Pause the video (CDP recording: click pause first) ──
     pause_btn = safe_eval("""
         var pb = document.querySelector('div.ytp-left-controls > button');
