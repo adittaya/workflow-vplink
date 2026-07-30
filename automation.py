@@ -133,7 +133,8 @@ TRAFFIC_UTM = {
 def _inject_traffic_source():
     if TRAFFIC_SOURCE not in TRAFFIC_REFERRERS:
         return
-    referrer = TRAFFIC_REFERRERS[TRAFFIC_SOURCE]
+    youtube_url = os.environ.get("VPLINK_YOUTUBE_URL", "")
+    referrer = youtube_url or TRAFFIC_REFERRERS[TRAFFIC_SOURCE]
     if not referrer:
         return
     referrer_js = f"""
@@ -168,7 +169,8 @@ def _add_utm_to_url(url):
 def _revisit_with_referrer(url):
     if TRAFFIC_SOURCE not in TRAFFIC_REFERRERS:
         return
-    referrer = TRAFFIC_REFERRERS[TRAFFIC_SOURCE]
+    youtube_url = os.environ.get("VPLINK_YOUTUBE_URL", "")
+    referrer = youtube_url or TRAFFIC_REFERRERS[TRAFFIC_SOURCE]
     if not referrer or not url:
         return
     try:
