@@ -3274,7 +3274,7 @@ def main():
     _create_driver()
     monitor.install(driver)
     automation_start = time.time()
-    AUTOMATION_HARD_TIMEOUT = 900  # 15 minutes max from browser start to destination
+    AUTOMATION_HARD_TIMEOUT = 1200  # 20 minutes max from browser start to destination
 
     storage_dir = Path.home() / ".vplink3.0" / "storage"
     storage_file = storage_dir / "state.json"

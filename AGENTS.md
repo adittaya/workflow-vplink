@@ -8,11 +8,12 @@
 ## Current State
 
 - **Last updated:** 2026-07-30
-- **Latest local commit:** `b9984bb` fix: check navigation after click — fall through to driver.get() if click doesn't leave YouTube
-- **Previous commit:** `21fddbf` fix: search shadow roots of ytd-comment-view-model for VPLink element (targeted, no stack overflow)
-- **Local codebase status:** MODIFIED — YouTube desktop-first rewrite + CDP recording UIx1EO analysis + ytd-expander a selector (unstaged)
+- **Latest local commit:** `2e42d68` fix: use raw VPLink URL (not YT redirect URL) for fallback driver.get()
+- **Previous commit:** `f8373c9` fix: desktop YouTube-first rewrite — ytd-expander a selector, pause video, CDP-recorded click flow
+- **Local codebase status:** MODIFIED — timeout bumped to 1200s for long funnels
 - **Accounts:** main (@adittaya), second (@rtff5665)
-- **CI status:** 4 consecutive successful runs, 1 in-progress. Relay working 24/7.
+- **CI status:** 4 consecutive successful runs, 1 cancelled (timeout — CE btn6 at 647s). YouTube nav fix verified.
+- **Hard timeout bumped to 1200s** (20 min) to accommodate 5+ article funnels with slow CE templates.
 - **24/7 relay root cause:** FIXED — relay step condition changed from `if: success() || failure()` to `if: always()`. Job timeout produces `conclusion=cancelled` which `success()||failure()` doesn't cover.
 - **Guard page root cause:** FIXED — when `learn_more.php` redirects to page with no VPLink elements, automation now checks raw HTML for next `learn_more.php` link and follows it instead of force-navigating back to vplink.in.
 - **YouTube nav root cause:** FIXED — VPLink URL was in `yt-attributed-string` shadow DOM. Targeted traversal of `ytd-comment-view-model.shadowRoot` ($`a[href*="/redirect"]` with `q=vplink`) finds the element. Click dispatched but mobile YT doesn't navigate away → `driver.get()` fallback.
@@ -43,7 +44,7 @@
 - **YouTube Navigation mode (NEW):** When `VPLINK_YOUTUBE_URL` is set, automation first navigates to a YouTube video, watches ~60s, finds a VPLink URL in the comment section, clicks it, then enters the normal VPLink funnel flow
 - **Relay system:** Each CI run dispatches next run via `repository_dispatch` (condition: `if: always()`)
 - **Proxy system:** 3 proxy attempts + 1 no-proxy fallback, one IP per session
-- **Timeouts:** AUTOMATION_HARD_TIMEOUT=900s, step timeout-minutes=15, bash timeout=880s
+- **Timeouts:** AUTOMATION_HARD_TIMEOUT=1200s, step timeout-minutes=20, bash timeout=1180s
 
 ---
 
@@ -83,7 +84,8 @@
 | `c21de5c` | ✅ Success, destination captured | `import re` fix. `element_found: false` (light DOM only) → `driver.get()` fallback worked |
 | `21fddbf` | ✅ Element found + clicked, but stayed on YT | `element_found: true` via shadow DOM search, `VPLink click: clicked` but mobile YT click doesn't navigate away |
 | `b9984bb` | ✅ Success | Click → still on YT → fallback → funnel entered ✅
-| *(current)* | MODIFIED | Desktop YouTube-first rewrite: `ytd-expander a` selector, pause video, CDP-recorded click flow. No more `m.youtube.com` forced mobile. |
+| `2e42d68` (run #2041) | ❌ Cancelled (timeout) | Raw VPLink URL fallback fix worked ✅ — VPLink found at 13.8s, funnel entered at 23.4s. Cancelled at 900s due to CE btn6 at 647s + remaining steps. Timeout bumped to 1200s. |
+| *(current)* | MODIFIED | Timeout bumped to 1200s for long funnels (5+ articles with slow CE). |
 
 ---
 
